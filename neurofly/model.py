@@ -51,6 +51,7 @@ class Params:
     t_dly: float = 1.8    # synaptic delay, ms
     w_syn: float = 0.275  # weight of one synapse, mV (the one free parameter)
     f_poi: float = 250.0  # Poisson kick = w_syn * f_poi mV
+    eps: float = 1e-2     # mV; below this a neuron counts as "at rest" (fast path only)
 
     def steps(self, t_ms: float) -> int:
         return int(round(t_ms / self.dt))
@@ -163,6 +164,20 @@ class FlyBrain:
         self.rfc_steps = np.full(self.n, self._base_rfc_steps, dtype=np.int64)
         # synapses added by hand: pre index -> (post indices, signed counts)
         self.extra: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+        self._extra_dirty = True
+        # per-neuron multiplier on all outgoing synapses (1 = connectome as is)
+        self.gain = np.ones(self.n, dtype=np.float64)
+
+        # fast path (numba): set of neurons that are not at rest
+        from . import fast as _fast
+        self.fast = _fast.AVAILABLE
+        self.awake = np.zeros(self.n, dtype=bool)
+        self._awake_list = np.zeros(self.n, dtype=np.int64)
+        self._n_awake = 0
+        self._awake_dirty = True
+        self._spk_buf = np.zeros(self.n, dtype=np.int64)
+        if seed is not None and self.fast:
+            _fast.seed(int(seed))
 
         self.reset()
 
@@ -236,9 +251,11 @@ class FlyBrain:
             self.extra[i] = (uniq[keep], merged[keep])
         else:
             self.extra.pop(i, None)
+        self._extra_dirty = True
 
     def disconnect(self, pre: NeuronRef | None = None, post: NeuronRef | None = None) -> None:
         """Remove hand-made connections (all, all from ``pre``, or one pair)."""
+        self._extra_dirty = True
         if pre is None:
             self.extra.clear()
             return
@@ -255,6 +272,23 @@ class FlyBrain:
             self.extra[i] = (posts[keep], w[keep])
         else:
             del self.extra[i]
+
+    def _extra_csc(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Hand-made synapses as CSC arrays (indptr, indices, data)."""
+        if self._extra_dirty or not hasattr(self, "_e_indptr"):
+            indptr = np.zeros(self.n + 1, dtype=np.int64)
+            idx, dat = [], []
+            for i in sorted(self.extra):
+                posts, w = self.extra[i]
+                indptr[i + 1] = len(posts)
+                idx.append(posts)
+                dat.append(w)
+            np.cumsum(indptr, out=indptr)
+            self._e_indptr = indptr
+            self._e_indices = np.concatenate(idx).astype(np.int64) if idx else np.zeros(0, np.int64)
+            self._e_data = np.concatenate(dat).astype(np.float32) if dat else np.zeros(0, np.float32)
+            self._extra_dirty = False
+        return self._e_indptr, self._e_indices, self._e_data
 
     def n_extra(self) -> int:
         return sum(len(p) for p, _ in self.extra.values())
@@ -289,6 +323,8 @@ class FlyBrain:
     def _refresh_stim(self) -> None:
         self._stim_idx = np.flatnonzero(self.stim_rate)
         self._stim_prob = self.stim_rate[self._stim_idx] * self.p.dt / 1000.0
+        self._stim_prob_all = self.stim_rate * self.p.dt / 1000.0
+        self._awake_dirty = True
 
     # ------------------------------------------------------------------ state
     def reset(self) -> None:
@@ -298,8 +334,17 @@ class FlyBrain:
         self.v = np.full(self.n, p.v_0, dtype=np.float64)
         self.g = np.zeros(self.n, dtype=np.float64)
         self.last_spike = np.full(self.n, -(1 << 40), dtype=np.int64)
-        self._ring = [np.empty(0, dtype=np.int64) for _ in range(self.delay_steps + 1)]
+        # delay line: slot s holds the neurons that spiked D steps before it is read
+        self._ring = np.zeros((self.delay_steps + 1, self.n), dtype=np.int64)
+        self._ring_len = np.zeros(self.delay_steps + 1, dtype=np.int64)
         self._refresh_stim()
+
+    def inject_spikes(self, neurons: NeuronRef | Iterable[NeuronRef], steps_ago: int = 1) -> None:
+        """Pretend the given neurons spiked ``steps_ago`` steps ago (testing aid)."""
+        idx = self.index(neurons)
+        slot = (self.k - steps_ago + self.delay_steps) % (self.delay_steps + 1)
+        self._ring[slot, : idx.size] = idx
+        self._ring_len[slot] = idx.size
 
     # ------------------------------------------------------------- dynamics
     def step(self) -> np.ndarray:
@@ -334,8 +379,9 @@ class FlyBrain:
         # 3a. synaptic input from spikes emitted delay_steps ago.
         # Brian2 drops every write to an "(unless refractory)" variable of a
         # refractory neuron, so input arriving in that window is lost.
-        slot = k % (self.delay_steps + 1)
-        pre = self._ring[slot]
+        L = self.delay_steps + 1
+        slot = k % L
+        pre = self._ring[slot, : self._ring_len[slot]]
         if pre.size:
             pre = pre[~self.silenced[pre]]
             if pre.size:
@@ -344,11 +390,13 @@ class FlyBrain:
                     for i in pre:
                         hit = self.extra.get(int(i))
                         if hit is not None:
-                            inc[hit[0]] += hit[1]
+                            inc[hit[0]] += hit[1] * self.gain[i]
                 if ridx.size:
                     inc[ridx] = 0.0
                 g += p.w_syn * inc
-        self._ring[(k + self.delay_steps) % (self.delay_steps + 1)] = spk
+        ws = (k + self.delay_steps) % L
+        self._ring[ws, : spk.size] = spk
+        self._ring_len[ws] = spk.size
 
         # 3b. Poisson kicks to activated neurons (same refractory rule)
         if self._stim_idx.size:
@@ -365,6 +413,7 @@ class FlyBrain:
             self.last_spike[spk] = k
 
         self.k = k + 1
+        self._awake_dirty = True
         return spk
 
     def _outgoing(self, pre: np.ndarray) -> np.ndarray:
@@ -377,21 +426,79 @@ class FlyBrain:
             return np.zeros(self.n)
         # positions of every stored entry of the selected columns
         pos = np.repeat(starts - np.cumsum(lens) + lens, lens) + np.arange(total)
-        return np.bincount(W.indices[pos], weights=W.data[pos], minlength=self.n)
+        weights = W.data[pos] * np.repeat(self.gain[pre], lens)
+        return np.bincount(W.indices[pos], weights=weights, minlength=self.n)
+
+    def _refresh_awake(self) -> None:
+        p = self.p
+        refr = (self.k - self.last_spike) < self.rfc_steps
+        awake = refr | (np.abs(self.v - p.v_0) > p.eps) | (np.abs(self.g) > p.eps) | (self.stim_rate > 0)
+        self.awake = awake
+        idx = np.flatnonzero(awake)
+        self._awake_list[: idx.size] = idx
+        self._n_awake = int(idx.size)
+        self._awake_dirty = False
+
+    def run_fast(self, n_steps: int, max_spikes: int | None = None) -> tuple[np.ndarray, np.ndarray]:
+        """Advance ``n_steps`` with the numba kernel; returns ``(step, index)`` of spikes."""
+        from . import fast as _fast
+
+        p = self.p
+        if self._awake_dirty:
+            self._refresh_awake()
+        e_indptr, e_indices, e_data = self._extra_csc()
+        cap = max_spikes or max(200_000, 400 * n_steps)
+        out_t = np.zeros(cap, dtype=np.int64)
+        out_i = np.zeros(cap, dtype=np.int64)
+        W = self.W
+        n_awake, n_out = _fast.run_window(
+            int(n_steps), int(self.k),
+            self.v, self.g, self.last_spike, self.rfc_steps, self.silenced, self.gain,
+            self._stim_idx, self._stim_prob_all,
+            self.awake, self._awake_list, int(self._n_awake), self._spk_buf,
+            W.indptr, W.indices, W.data,
+            e_indptr, e_indices, e_data,
+            self._ring, self._ring_len, int(self.delay_steps),
+            float(self._A), float(self._B), float(self._C), float(p.v_0), float(p.v_th), float(p.v_rst),
+            float(p.w_syn), float(p.w_syn * p.f_poi), float(p.eps),
+            out_t, out_i,
+        )
+        self._n_awake = int(n_awake)
+        self.k += int(n_steps)
+        return out_t[:n_out], out_i[:n_out]
+
+    @property
+    def n_awake(self) -> int:
+        if self._awake_dirty:
+            self._refresh_awake()
+        return self._n_awake
 
     def run(self, t_ms: float, record: bool = True, progress: bool = False, trial: int = 0) -> SpikeRecord:
         """Simulate ``t_ms`` milliseconds from the current state."""
         n_steps = self.p.steps(t_ms)
         k0 = self.k
         times, idxs = [], []
-        report = max(1, n_steps // 10) if progress else 0
-        for i in range(n_steps):
-            spk = self.step()
-            if record and spk.size:
-                idxs.append(spk)
-                times.append(np.full(spk.size, (self.k - 1) * self.p.dt))
-            if report and (i + 1) % report == 0:
-                print(f"  {100 * (i + 1) // n_steps:3d}%  t = {self.t_ms:8.1f} ms", flush=True)
+        if self.fast:
+            chunk = 1000
+            done = 0
+            while done < n_steps:
+                m = min(chunk, n_steps - done)
+                st, ix = self.run_fast(m)
+                if record and ix.size:
+                    times.append(st * self.p.dt)
+                    idxs.append(ix)
+                done += m
+                if progress and (done % max(chunk, n_steps // 10) == 0 or done == n_steps):
+                    print(f"  {100 * done // n_steps:3d}%  t = {self.t_ms:8.1f} ms", flush=True)
+        else:
+            report = max(1, n_steps // 10) if progress else 0
+            for i in range(n_steps):
+                spk = self.step()
+                if record and spk.size:
+                    idxs.append(spk)
+                    times.append(np.full(spk.size, (self.k - 1) * self.p.dt))
+                if report and (i + 1) % report == 0:
+                    print(f"  {100 * (i + 1) // n_steps:3d}%  t = {self.t_ms:8.1f} ms", flush=True)
         if idxs:
             t = np.concatenate(times) - k0 * self.p.dt
             ix = np.concatenate(idxs)

@@ -100,8 +100,12 @@ def cmd_run(args: argparse.Namespace) -> None:
 def cmd_serve(args: argparse.Namespace) -> None:
     from .server import main as serve_main
 
+    from .traces import TraceParams
+
+    tp = TraceParams(hold_s=args.hold, alpha=args.trace_alpha, gain_max=args.trace_max, tau_h=args.trace_tau)
     serve_main(host=args.host, port=args.port, window_ms=args.window, seed=args.seed,
-               data_dir=args.data_dir, release=args.release, prefetch_meshes=not args.no_meshes)
+               data_dir=args.data_dir, release=args.release, prefetch_meshes=not args.no_meshes,
+               fresh=args.fresh, synapse_points=not args.no_synapses, trace_params=tp)
 
 
 def cmd_archive(args: argparse.Namespace) -> None:
@@ -115,6 +119,9 @@ def cmd_archive(args: argparse.Namespace) -> None:
         n = len(ids) if args.skeletons == "all" else int(args.skeletons)
         print(f"fetching {n} skeletons...", file=sys.stderr)
         fetch_skeletons(ids[:n], args.data_dir, workers=args.workers)
+    if args.synapses:
+        from .synapses import build_index
+        build_index(ids, args.data_dir)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -151,11 +158,18 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--window", type=float, default=10.0, help="ms of model time per streamed frame")
     s.add_argument("--seed", type=int, default=None)
     s.add_argument("--no-meshes", action="store_true", help="do not download the brain outline mesh")
+    s.add_argument("--no-synapses", action="store_true", help="do not load the synapse point index")
+    s.add_argument("--fresh", action="store_true", help="ignore the saved state of the day")
+    s.add_argument("--hold", type=float, default=20.0, help="seconds a visitor's activation lasts (0 = until removed)")
+    s.add_argument("--trace-alpha", type=float, default=1e-4, help="gain added to a neuron's outputs per spike (0 = off)")
+    s.add_argument("--trace-max", type=float, default=1.6, help="ceiling of the use trace")
+    s.add_argument("--trace-tau", type=float, default=8.0, help="hours for the trace to decay by 1/e")
     s.set_defaults(func=cmd_serve)
 
     a = sub.add_parser("archive", help="prefetch the public FlyWire archive (meshes, skeletons) for offline use")
     a.add_argument("--meshes", action="store_true", help="brain outline and 75 neuropil meshes (~10 MB)")
     a.add_argument("--skeletons", default=None, help="number of skeletons to fetch, or 'all' (~139k files, several GB)")
+    a.add_argument("--synapses", action="store_true", help="download the synapse table (2 GB) and build the point index")
     a.add_argument("--workers", type=int, default=8)
     a.set_defaults(func=cmd_archive)
 

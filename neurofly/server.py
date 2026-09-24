@@ -49,10 +49,13 @@ import numpy as np
 from . import neurons as N
 from .annotations import Atlas
 from .archive import NEUROPILS, load_mesh, skeleton_segments
-from .data import load_brain
+from .data import load_brain, default_data_dir
 from .model import FlyBrain
+from .synapses import SynapseIndex
+from .traces import TraceParams, Traces
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+MAX_PAIRS_PER_CONNECT = 4000   # a type-to-type connection between two big types is sampled down to this
 
 
 # ------------------------------------------------------------------ presets
@@ -81,16 +84,20 @@ def build_presets(brain: FlyBrain, atlas: Atlas) -> list[dict]:
 class Simulation(threading.Thread):
     """Runs the brain in its own thread; talks to asyncio through queues."""
 
-    def __init__(self, brain: FlyBrain, atlas: Atlas, window_ms: float = 10.0):
+    def __init__(self, brain: FlyBrain, atlas: Atlas, window_ms: float = 10.0, traces: Traces | None = None):
         super().__init__(daemon=True)
         self.brain = brain
         self.atlas = atlas
+        self.traces = traces
         self.window_ms = window_ms
         self.commands: Queue = Queue()
         self.frames: Queue = Queue(maxsize=64)
         self.paused = False
         self.speed = 1.0          # target bio seconds per wall second
-        self.realtime_ratio = 0.0  # measured bio / wall
+        self.realtime_ratio = 0.0  # measured bio / wall, pacing included
+        self.compute_ratio = 0.0   # bio / wall of the computation alone
+        self._last_start = None
+        self._ema_full = None
         self.spikes_per_s = 0.0
         self.active_recent = 0
         self.lock = threading.Lock()
@@ -103,20 +110,34 @@ class Simulation(threading.Thread):
         while True:
             self._drain_commands()
             if self.paused:
+                self._last_start = None
                 time.sleep(0.05)
                 continue
             t0 = time.perf_counter()
+            if self._last_start is not None:
+                # wall time per window including pacing: what the screen actually sees
+                full = t0 - self._last_start
+                self._ema_full = full if self._ema_full is None else 0.9 * self._ema_full + 0.1 * full
+                self.realtime_ratio = (self.window_ms / 1000) / max(self._ema_full, 1e-9)
+            self._last_start = t0
             with self.lock:
-                spk = []
-                for _ in range(self.window_steps):
-                    s = b.step()
-                    if s.size:
-                        spk.append(s)
+                if b.fast:
+                    _, ix = b.run_fast(self.window_steps)
+                    idx = ix.astype(np.uint32)
+                else:
+                    spk = []
+                    for _ in range(self.window_steps):
+                        s = b.step()
+                        if s.size:
+                            spk.append(s)
+                    idx = np.concatenate(spk).astype(np.uint32) if spk else np.empty(0, np.uint32)
                 t_ms = b.t_ms
-            idx = np.concatenate(spk).astype(np.uint32) if spk else np.empty(0, np.uint32)
+                if self.traces is not None:
+                    self.traces.after_window(idx, self.window_ms)
+                    self.traces.save()
             wall = time.perf_counter() - t0
             ema_wall = wall if ema_wall is None else 0.9 * ema_wall + 0.1 * wall
-            self.realtime_ratio = (self.window_ms / 1000) / max(ema_wall, 1e-9)
+            self.compute_ratio = (self.window_ms / 1000) / max(ema_wall, 1e-9)
             recent.append(idx)
             if len(recent) > int(1000 / self.window_ms):
                 recent.pop(0)
@@ -165,30 +186,65 @@ class Simulation(threading.Thread):
     def _apply(self, cmd: dict):
         b = self.brain
         c = cmd.get("cmd")
+        tr = self.traces
         with self.lock:
             if c == "activate":
                 idx = self._expand(cmd.get("idx", []), cmd.get("expand"))
-                b.activate(idx, float(cmd.get("rate", 100)))
+                rate = float(cmd.get("rate", 100))
+                b.activate(idx, rate)
+                if tr:
+                    tr.hold(idx, cmd.get("hold"))
+                    tr.log("activate", n=len(idx), rate=rate, label=self._label(cmd.get("idx", [])))
                 return {"type": "ack", "cmd": c, "n": len(idx)}
             if c == "deactivate":
                 idx = cmd.get("idx")
-                b.deactivate(self._expand(idx, cmd.get("expand")) if idx else None)
+                idx = self._expand(idx, cmd.get("expand")) if idx else None
+                b.deactivate(idx)
+                if tr:
+                    tr.release(idx)
             elif c == "silence":
                 idx = self._expand(cmd.get("idx", []), cmd.get("expand"))
                 b.silence(idx)
+                if tr:
+                    tr.log("silence", n=len(idx), label=self._label(cmd.get("idx", [])))
                 return {"type": "ack", "cmd": c, "n": len(idx)}
             elif c == "unsilence":
                 idx = cmd.get("idx")
                 b.unsilence(self._expand(idx, cmd.get("expand")) if idx else None)
+                if tr:
+                    tr.log("unsilence", n=len(idx) if idx else -1)
             elif c == "connect":
-                b.connect(int(cmd["pre"]), int(cmd["post"]), float(cmd.get("n", 10)), int(cmd.get("sign", 1)))
+                pre, post = int(cmd["pre"]), int(cmd["post"])
+                n_syn, sign = float(cmd.get("n", 10)), int(cmd.get("sign", 1))
+                pres = self._expand([pre], cmd.get("expand"))
+                posts = [j for j in self._expand([post], cmd.get("expand")) if j not in set(pres)] or [post]
+                pairs = self._pair_groups(pres, posts, MAX_PAIRS_PER_CONNECT)
+                for i, j in pairs:
+                    b.connect(i, j, n_syn, sign)
+                if tr:
+                    lab = f"{self._label([pre])} → {self._label([post])}"
+                    if len(pairs) > 1:
+                        lab += f" ({len(pres)}×{len(posts)})"
+                    tr.log("connect", pre=pre, post=post, n=n_syn, sign=sign, pairs=len(pairs), label=lab)
+                return {"type": "ack", "cmd": c, "n": len(pairs)}
             elif c == "disconnect":
                 pre, post = cmd.get("pre"), cmd.get("post")
                 b.disconnect(None if pre is None else int(pre), None if post is None else int(post))
+                if tr:
+                    tr.log("disconnect")
             elif c == "reset":
                 b.reset()
             elif c == "clear":
                 b.clear()
+                if tr:
+                    tr.release()
+                    tr.log("clear")
+            elif c == "new_day":
+                if tr:
+                    tr.new_day()
+                else:
+                    b.clear()
+                    b.gain[:] = 1.0
             elif c == "pause":
                 self.paused = True
             elif c == "play":
@@ -203,6 +259,22 @@ class Simulation(threading.Thread):
             else:
                 return {"type": "error", "message": f"unknown command {c!r}"}
         return {"type": "ack", "cmd": c}
+
+    @staticmethod
+    def _pair_groups(pres, posts, cap):
+        """All pre x post pairs, or a random sample of ``cap`` when there are too many."""
+        total = len(pres) * len(posts)
+        if total <= cap:
+            return [(int(i), int(j)) for i in pres for j in posts]
+        rng = np.random.default_rng()
+        k = rng.choice(total, size=cap, replace=False)
+        return [(int(pres[t // len(posts)]), int(posts[t % len(posts)])) for t in k]
+
+    def _label(self, idx) -> str:
+        if not idx:
+            return ""
+        row = self.atlas.df.iloc[int(idx[0])]
+        return str(row.cell_type) or str(row.hemibrain_type) or str(row.super_class) or "?"
 
     def _info(self, i: int) -> dict:
         b, df = self.brain, self.atlas.df
@@ -229,6 +301,7 @@ class Simulation(threading.Thread):
             "in": [[int(in_idx[k]), float(in_w[k])] for k in order_in],
             "stim": float(b.stim_rate[i]),
             "silenced": bool(b.silenced[i]),
+            "gain": float(b.gain[i]),
         }
 
     def status(self) -> dict:
@@ -241,6 +314,7 @@ class Simulation(threading.Thread):
                 "paused": self.paused,
                 "speed": self.speed,
                 "realtime": self.realtime_ratio,
+                "compute": self.compute_ratio,
                 "spikes_per_s": self.spikes_per_s,
                 "active": self.active_recent,
                 "stim": [[int(i), float(b.stim_rate[i])] for i in stim[:5000]],
@@ -249,15 +323,27 @@ class Simulation(threading.Thread):
                 "n_silenced": int(b.silenced.sum()),
                 "extra": [[int(pre), int(p), float(w)] for pre, (posts, ws) in b.extra.items() for p, w in zip(posts, ws)][:5000],
                 "n_extra": b.n_extra(),
+                "awake": int(b.n_awake) if b.fast else -1,
+                "fast": bool(b.fast),
+                "traces": self.traces.summary() if self.traces else None,
             }
+
+
+def asdict_traces(tr: Traces | None):
+    if tr is None:
+        return None
+    from dataclasses import asdict
+    return asdict(tr.p)
 
 
 # ------------------------------------------------------------------- server
 class GalleryServer:
-    def __init__(self, brain: FlyBrain, atlas: Atlas, window_ms: float = 10.0):
+    def __init__(self, brain: FlyBrain, atlas: Atlas, window_ms: float = 10.0, traces: Traces | None = None,
+                 synapses: SynapseIndex | None = None):
         self.brain = brain
         self.atlas = atlas
-        self.sim = Simulation(brain, atlas, window_ms)
+        self.synapses = synapses
+        self.sim = Simulation(brain, atlas, window_ms, traces)
         self.clients: set = set()
         self.presets = build_presets(brain, atlas)
         self._neurons_bin = None
@@ -292,8 +378,39 @@ class GalleryServer:
                 "window_ms": self.sim.window_ms,
                 "n_connections": int(self.brain.W.nnz),
                 "n_synapses": int(np.abs(self.brain.W.data).sum()),
+                "has_synapse_points": self.synapses is not None,
+                "traces": asdict_traces(self.sim.traces),
             }
         return self._meta
+
+    def synapses_bin(self, idx: int, direction: str) -> bytes:
+        """``uint32 m`` + ``float32 (m,3)`` positions + ``uint32 (m,)`` partner index."""
+        if self.synapses is None:
+            return struct.pack("<I", 0)
+        xyz, partner = self.synapses.outputs(idx) if direction == "out" else self.synapses.inputs(idx)
+        if len(xyz) > 20000:  # keep a frame light on a weak machine
+            sel = np.linspace(0, len(xyz) - 1, 20000).astype(np.int64)
+            xyz, partner = xyz[sel], partner[sel]
+        return struct.pack("<I", len(xyz)) + xyz.astype("<f4").tobytes() + partner.astype("<u4").tobytes()
+
+    def contact_point(self, pre: int, post: int) -> list[float]:
+        """Where a hand-made synapse would sit: closest pair between the
+        presynaptic neuron's output sites and the postsynaptic neuron's
+        input sites (falls back to anchor points)."""
+        P = self.atlas.positions()
+        if self.synapses is not None:
+            a, _ = self.synapses.outputs(pre)
+            b, _ = self.synapses.inputs(post)
+            if len(a) and len(b):
+                from scipy.spatial import cKDTree
+                if len(a) > 5000:
+                    a = a[np.linspace(0, len(a) - 1, 5000).astype(int)]
+                if len(b) > 5000:
+                    b = b[np.linspace(0, len(b) - 1, 5000).astype(int)]
+                d, j = cKDTree(b).query(a)
+                k = int(np.argmin(d))
+                return ((a[k] + b[j[k]]) / 2).tolist()
+        return ((P[pre] + P[post]) / 2).tolist()
 
     def mesh_bin(self, name: str) -> bytes:
         if name not in self._mesh_cache:
@@ -332,6 +449,23 @@ class GalleryServer:
                 return resp(self.neurons_bin(), "application/octet-stream")
             if path.startswith("/api/mesh/"):
                 return resp(self.mesh_bin(path.rsplit("/", 1)[1]), "application/octet-stream")
+            if path.startswith("/api/synapses/"):
+                parts = path.split("/")
+                return resp(self.synapses_bin(int(parts[3]), parts[4] if len(parts) > 4 else "out"), "application/octet-stream")
+            if path.startswith("/api/contact/"):
+                parts = path.split("/")
+                return resp(json.dumps(self.contact_point(int(parts[3]), int(parts[4]))).encode(), "application/json")
+            if path.startswith("/api/contacts"):
+                q = request.path.split("pairs=", 1)[1] if "pairs=" in request.path else ""
+                out = {}
+                for tok in q.split(",")[:120]:
+                    if "-" in tok:
+                        a, b_ = tok.split("-")
+                        out[tok] = self.contact_point(int(a), int(b_))
+                return resp(json.dumps(out).encode(), "application/json")
+            if path == "/api/journal":
+                tr = self.sim.traces
+                return resp(json.dumps(tr.journal[-200:] if tr else []).encode(), "application/json")
             if path.startswith("/api/skeleton/"):
                 return resp(self.skeleton_bin(int(path.rsplit("/", 1)[1])), "application/octet-stream")
             if path.startswith("/api/search"):
@@ -414,7 +548,8 @@ class GalleryServer:
 
 
 def main(host: str = "0.0.0.0", port: int = 8765, window_ms: float = 10.0, seed: int | None = None,
-         data_dir=None, release=None, prefetch_meshes: bool = True) -> None:
+         data_dir=None, release=None, prefetch_meshes: bool = True, fresh: bool = False,
+         synapse_points: bool = True, trace_params: TraceParams | None = None) -> None:
     brain = load_brain(data_dir, seed=seed, release=release)
     atlas = Atlas(brain.ids, data_dir)
     if prefetch_meshes:
@@ -423,5 +558,19 @@ def main(host: str = "0.0.0.0", port: int = 8765, window_ms: float = 10.0, seed:
             fetch_meshes(["volume"])
         except Exception as e:
             print(f"brain mesh unavailable ({e}); the screen works without it", file=sys.stderr)
-    server = GalleryServer(brain, atlas, window_ms)
-    asyncio.run(server.serve(host, port))
+    syn = None
+    if synapse_points:
+        try:
+            syn = SynapseIndex(brain.ids, data_dir, build=False)
+            print(f"synapse points: {len(syn)}", file=sys.stderr)
+        except FileNotFoundError:
+            print("synapse points not built (run `neurofly archive --synapses`); showing lines instead", file=sys.stderr)
+    state_dir = (Path(data_dir) if data_dir else default_data_dir()) / "state"
+    traces = Traces(brain, trace_params or TraceParams(), state_dir, fresh=fresh)
+    print(f"traces: {traces.summary()['actions']} actions in the journal, "
+          f"{traces.summary()['traced_neurons']} traced neurons, {brain.n_extra()} hand-made synapses", file=sys.stderr)
+    server = GalleryServer(brain, atlas, window_ms, traces, syn)
+    try:
+        asyncio.run(server.serve(host, port))
+    finally:
+        traces.save(force=True)
