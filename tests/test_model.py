@@ -142,3 +142,29 @@ def test_input_during_refractory_period_is_dropped():
     inject_spike_of_neuron_0()
     b.run(b.p.t_dly)
     assert b.g[1] == pytest.approx(110.0)
+
+
+def test_connect_adds_a_working_synapse_and_disconnect_removes_it():
+    b = make()                       # no connections at all
+    b.activate(IDS[0], rate_hz=200)
+    assert b.run(500).rate_of(IDS[2]) == 0
+    b.connect(IDS[0], IDS[2], n_synapses=100)
+    assert b.n_extra() == 1
+    idx, w = b.synapses_of(IDS[0])
+    assert idx.tolist() == [2] and w.tolist() == [100.0]
+    b.reset()
+    assert b.run(500).rate_of(IDS[2]) > 20
+    b.connect(IDS[0], IDS[2], n_synapses=100, sign=-1)   # cancels out exactly
+    assert b.n_extra() == 0
+    b.connect(IDS[0], [IDS[1], IDS[2]], n_synapses=5)
+    b.disconnect(IDS[0], IDS[1])
+    assert b.synapses_of(IDS[0])[0].tolist() == [2]
+    b.clear()
+    assert b.n_extra() == 0
+
+
+def test_synapses_of_in_and_out():
+    b = make(w_01=7, w_12=-3)
+    assert b.synapses_of(IDS[1], "in")[0].tolist() == [0]
+    assert b.synapses_of(IDS[1], "in")[1].tolist() == [7.0]
+    assert b.synapses_of(IDS[1], "out")[1].tolist() == [-3.0]

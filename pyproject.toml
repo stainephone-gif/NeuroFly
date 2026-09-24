@@ -17,6 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gallery = ["websockets>=13"]
 plot = ["matplotlib>=3.7"]
 dev = ["pytest>=7"]
 
@@ -25,6 +26,9 @@ neurofly = "neurofly.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["neurofly*"]
+
+[tool.setuptools.package-data]
+neurofly = []
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

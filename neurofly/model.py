@@ -161,6 +161,8 @@ class FlyBrain:
         self.stim_rate = np.zeros(self.n)           # Hz, per neuron
         self.silenced = np.zeros(self.n, dtype=bool)
         self.rfc_steps = np.full(self.n, self._base_rfc_steps, dtype=np.int64)
+        # synapses added by hand: pre index -> (post indices, signed counts)
+        self.extra: dict[int, tuple[np.ndarray, np.ndarray]] = {}
 
         self.reset()
 
@@ -211,10 +213,77 @@ class FlyBrain:
         else:
             self.silenced[self.index(neurons)] = False
 
+    def connect(self, pre: NeuronRef, post: NeuronRef | Iterable[NeuronRef], n_synapses: float = 10, sign: int = 1) -> None:
+        """Add a hand-made connection from ``pre`` to ``post``.
+
+        ``n_synapses`` sets the strength in units of one synapse (``w_syn``),
+        ``sign`` +1 for excitatory, -1 for inhibitory. Repeated calls for
+        the same pair add up. Extra connections are kept in ``self.extra``
+        and are separate from the connectome, so ``disconnect`` restores
+        the original wiring exactly.
+        """
+        i = int(self.index(pre)[0])
+        posts = self.index(post)
+        old_post, old_w = self.extra.get(i, (np.empty(0, np.int64), np.empty(0, np.float32)))
+        new_post = np.concatenate([old_post, posts])
+        new_w = np.concatenate([old_w, np.full(posts.size, sign * float(n_synapses), dtype=np.float32)])
+        # merge duplicates
+        uniq, inv = np.unique(new_post, return_inverse=True)
+        merged = np.zeros(uniq.size, dtype=np.float32)
+        np.add.at(merged, inv, new_w)
+        keep = merged != 0
+        if keep.any():
+            self.extra[i] = (uniq[keep], merged[keep])
+        else:
+            self.extra.pop(i, None)
+
+    def disconnect(self, pre: NeuronRef | None = None, post: NeuronRef | None = None) -> None:
+        """Remove hand-made connections (all, all from ``pre``, or one pair)."""
+        if pre is None:
+            self.extra.clear()
+            return
+        i = int(self.index(pre)[0])
+        if i not in self.extra:
+            return
+        if post is None:
+            del self.extra[i]
+            return
+        j = int(self.index(post)[0])
+        posts, w = self.extra[i]
+        keep = posts != j
+        if keep.any():
+            self.extra[i] = (posts[keep], w[keep])
+        else:
+            del self.extra[i]
+
+    def n_extra(self) -> int:
+        return sum(len(p) for p, _ in self.extra.values())
+
+    def synapses_of(self, neuron: NeuronRef, direction: str = "out") -> tuple[np.ndarray, np.ndarray]:
+        """Connectome partners of a neuron: ``(indices, signed synapse counts)``.
+
+        ``direction`` "out" lists postsynaptic targets, "in" presynaptic
+        sources. Hand-made connections are included for "out".
+        """
+        i = int(self.index(neuron)[0])
+        W = self.W
+        if direction == "out":
+            sl = slice(W.indptr[i], W.indptr[i + 1])
+            idx, w = W.indices[sl].astype(np.int64), W.data[sl].astype(np.float32)
+            if i in self.extra:
+                idx = np.concatenate([idx, self.extra[i][0]])
+                w = np.concatenate([w, self.extra[i][1]])
+            return idx, w
+        if not hasattr(self, "_Wr"):
+            self._Wr = W.tocsr()
+        sl = slice(self._Wr.indptr[i], self._Wr.indptr[i + 1])
+        return self._Wr.indices[sl].astype(np.int64), self._Wr.data[sl].astype(np.float32)
+
     def clear(self) -> None:
         """Remove every manipulation and reset the state."""
         self.deactivate()
         self.unsilence()
+        self.disconnect()
         self.reset()
 
     def _refresh_stim(self) -> None:
@@ -271,6 +340,11 @@ class FlyBrain:
             pre = pre[~self.silenced[pre]]
             if pre.size:
                 inc = self._outgoing(pre)
+                if self.extra:
+                    for i in pre:
+                        hit = self.extra.get(int(i))
+                        if hit is not None:
+                            inc[hit[0]] += hit[1]
                 if ridx.size:
                     inc[ridx] = 0.0
                 g += p.w_syn * inc

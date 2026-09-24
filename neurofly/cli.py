@@ -97,6 +97,26 @@ def cmd_run(args: argparse.Namespace) -> None:
         print(f"\nspikes written to {out}", file=sys.stderr)
 
 
+def cmd_serve(args: argparse.Namespace) -> None:
+    from .server import main as serve_main
+
+    serve_main(host=args.host, port=args.port, window_ms=args.window, seed=args.seed,
+               data_dir=args.data_dir, release=args.release, prefetch_meshes=not args.no_meshes)
+
+
+def cmd_archive(args: argparse.Namespace) -> None:
+    from .archive import fetch_meshes, fetch_skeletons
+    from .data import load_connectome
+
+    ids, _ = load_connectome(args.data_dir, release=args.release)
+    if args.meshes:
+        fetch_meshes()
+    if args.skeletons:
+        n = len(ids) if args.skeletons == "all" else int(args.skeletons)
+        print(f"fetching {n} skeletons...", file=sys.stderr)
+        fetch_skeletons(ids[:n], args.data_dir, workers=args.workers)
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="neurofly", description=__doc__)
     ap.add_argument("--data-dir", default=None, help="where the connectome lives (default: $NEUROFLY_DATA or ./data)")
@@ -124,6 +144,20 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--out", default=None, help="write all spikes to this parquet file")
     r.add_argument("--progress", action="store_true")
     r.set_defaults(func=cmd_run)
+
+    s = sub.add_parser("serve", help="start the gallery server (simulation + web viewer)")
+    s.add_argument("--host", default="0.0.0.0")
+    s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--window", type=float, default=10.0, help="ms of model time per streamed frame")
+    s.add_argument("--seed", type=int, default=None)
+    s.add_argument("--no-meshes", action="store_true", help="do not download the brain outline mesh")
+    s.set_defaults(func=cmd_serve)
+
+    a = sub.add_parser("archive", help="prefetch the public FlyWire archive (meshes, skeletons) for offline use")
+    a.add_argument("--meshes", action="store_true", help="brain outline and 75 neuropil meshes (~10 MB)")
+    a.add_argument("--skeletons", default=None, help="number of skeletons to fetch, or 'all' (~139k files, several GB)")
+    a.add_argument("--workers", type=int, default=8)
+    a.set_defaults(func=cmd_archive)
 
     args = ap.parse_args(argv)
     args.func(args)
