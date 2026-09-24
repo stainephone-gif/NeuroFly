@@ -42,7 +42,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-let points, pointMat, synLines, extraLines, skeletonLines, selectMarker;
+let points, pointMat, synLines, extraLines, skeletonLines, selectMarker, synPoints = null, contactPoints = null;
 
 function buildPoints() {
   const g = new THREE.BufferGeometry();
@@ -208,6 +208,54 @@ function drawExtra(list) {
   setLines(extraLines, segs, col);
 }
 
+function setSynPoints(xyz, colors) {
+  if (synPoints) { scene.remove(synPoints); synPoints.geometry.dispose(); synPoints = null; }
+  if (!xyz.length) return;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(xyz, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  synPoints = new THREE.Points(g, new THREE.PointsMaterial({ size: 2.2, vertexColors: true, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true }));
+  scene.add(synPoints);
+}
+
+async function showSynapsePoints(i) {
+  setStatus('загружаю синапсы…');
+  try {
+    const [outB, inB] = await Promise.all([
+      (await fetch(`/api/synapses/${i}/out`)).arrayBuffer(), (await fetch(`/api/synapses/${i}/in`)).arrayBuffer()]);
+    const parse = (buf) => { const m = new Uint32Array(buf, 0, 1)[0]; return new Float32Array(buf, 4, m * 3); };
+    const o = parse(outB), n = parse(inB);
+    const xyz = new Float32Array(o.length + n.length); xyz.set(o); xyz.set(n, o.length);
+    const col = new Float32Array(xyz.length);
+    for (let k = 0; k < o.length / 3; k++) col.set([1.0, 0.75, 0.3], 3 * k);
+    for (let k = 0; k < n.length / 3; k++) col.set([0.35, 0.7, 1.0], o.length + 3 * k);
+    setSynPoints(xyz, col);
+    setStatus(`${o.length / 3} выходных (жёлтые) и ${n.length / 3} входных (синие) синапсов`);
+  } catch (e) { setStatus('синапсы недоступны'); }
+}
+
+const contactCache = new Map();
+async function drawContacts(list) {
+  // one bright dot where each hand-made synapse sits, plus the line
+  const pts = [];
+  for (const [a, b, w] of list) {
+    const key = `${a}-${b}`;
+    if (!contactCache.has(key)) {
+      try { contactCache.set(key, await (await fetch(`/api/contact/${a}/${b}`)).json()); } catch (e) { continue; }
+    }
+    pts.push([contactCache.get(key), w]);
+  }
+  if (contactPoints) { scene.remove(contactPoints); contactPoints.geometry.dispose(); contactPoints = null; }
+  if (!pts.length) return;
+  const xyz = new Float32Array(pts.length * 3), col = new Float32Array(pts.length * 3);
+  pts.forEach(([p, w], k) => { xyz.set(p, 3 * k); col.set(w > 0 ? [1.0, 0.85, 0.3] : [1.0, 0.4, 0.7], 3 * k); });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(xyz, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  contactPoints = new THREE.Points(g, new THREE.PointsMaterial({ size: 9, vertexColors: true, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
+  scene.add(contactPoints);
+}
+
 async function showSkeleton(i) {
   setStatus('загружаю форму нейрона…');
   try {
@@ -261,10 +309,20 @@ function onStatus(s) {
     for (const i of s.silenced) flag[i] = 2;
     points.geometry.attributes.flag.needsUpdate = true;
   }
-  drawExtra(s.extra);
+  drawExtra(s.extra); drawContacts(s.extra);
+  if (s.traces) {
+    const tr = s.traces;
+    $('#day-actions').textContent = tr.actions; $('#day-traced').textContent = tr.traced_neurons;
+    const verb = { activate: 'возбудил', silence: 'выключил', unsilence: 'включил', connect: 'связал', disconnect: 'разорвал', clear: 'снял всё' };
+    $('#feed').innerHTML = tr.recent.slice(-4).map((e) => {
+      const t = new Date(e.t * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+      const what = e.action === 'connect' ? e.label : (e.label ? `${e.label}${e.n > 1 ? ' × ' + e.n : ''}` : '');
+      return `<div>${t} · ${verb[e.action] || e.action} ${what}</div>`;
+    }).join('');
+  }
   $('#n-stim').textContent = s.n_stim; $('#n-sil').textContent = s.n_silenced; $('#n-extra').textContent = s.n_extra;
   $('#rate').textContent = Math.round(s.spikes_per_s); $('#active').textContent = s.active;
-  $('#speed').textContent = s.paused ? 'пауза' : `${s.realtime.toFixed(2)}× реального`;
+  $('#speed').textContent = s.paused ? 'пауза' : `${s.realtime.toFixed(2)}× реального` + (s.awake >= 0 ? ` · не спят ${s.awake}` : '');
   $('#pause').textContent = s.paused ? 'Пуск' : 'Пауза';
   for (const b of document.querySelectorAll('#presets button')) {
     const p = state.meta.presets[+b.dataset.k];
@@ -285,6 +343,7 @@ function onInfo(info) {
   st.push(['входов', `${info.n_in} нейронов · ${info.syn_in} синапсов`]);
   st.push(['выходов', `${info.n_out} нейронов · ${info.syn_out} синапсов`]);
   st.push(['состояние', info.silenced ? 'выключен' : info.stim > 0 ? `возбуждён ${info.stim} Гц` : 'обычное']);
+  if (info.gain && Math.abs(info.gain - 1) > 0.001) st.push(['след дня', `выходы × ${info.gain.toFixed(3)}`]);
   $('#info-stats').innerHTML = st.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('');
   $('#info-activate').textContent = info.stim > 0 ? 'Снять возбуждение' : 'Возбудить тип';
   $('#info-silence').textContent = info.silenced ? 'Включить тип' : 'Выключить тип';
@@ -295,20 +354,22 @@ function setStatus(t) { $('#status').textContent = t; }
 for (const b of document.querySelectorAll('[data-mode]')) b.onclick = () => {
   state.mode = b.dataset.mode; state.pendingPre = null;
   for (const o of document.querySelectorAll('[data-mode]')) o.classList.toggle('on', o === b);
-  $('#hint').textContent = { look: 'щёлкните по нейрону, чтобы узнать, кто он', activate: 'щёлкните по нейрону: все клетки его типа получат стимул', silence: 'щёлкните по нейрону: все клетки его типа замолчат', connect: 'щёлкните по источнику, затем по цели: появится новая связь' }[state.mode];
+  $('#hint').textContent = { look: 'щёлкните по нейрону, чтобы узнать, кто он', activate: 'щёлкните по нейрону: все клетки его типа получат стимул на 20 секунд', silence: 'щёлкните по нейрону: все клетки его типа замолчат', connect: 'щёлкните по источнику, затем по цели: появится новая связь' }[state.mode];
 };
 $('#rate-slider').oninput = (e) => $('#rate-out').textContent = `${e.target.value} Гц`;
 $('#w-slider').oninput = (e) => $('#w-out').textContent = e.target.value;
 $('#sign').onclick = () => { const b = $('#sign'); const on = !b.classList.contains('on'); b.classList.toggle('on', on); b.textContent = on ? '+ возбуждающая' : '− тормозная'; };
 $('#pause').onclick = () => send({ cmd: state.status && state.status.paused ? 'play' : 'pause' });
 $('#reset').onclick = () => send({ cmd: 'reset' });
-$('#clear').onclick = () => { send({ cmd: 'clear' }); setLines(synLines, new Float32Array(0), new Float32Array(0)); setLines(skeletonLines, new Float32Array(0), new Float32Array(0)); };
+$('#clear').onclick = () => { send({ cmd: 'clear' }); setLines(synLines, new Float32Array(0), new Float32Array(0)); setLines(skeletonLines, new Float32Array(0), new Float32Array(0)); setSynPoints(new Float32Array(0), new Float32Array(0)); };
 $('#toggle-scope').onclick = () => { state.scope = state.scope === 'type' ? 'type_side' : 'type'; $('#toggle-scope').textContent = state.scope === 'type' ? 'Тип клеток: обе стороны' : 'Тип клеток: одна сторона'; };
 $('#info-close').onclick = () => { $('#info').style.display = 'none'; selectMarker.visible = false; };
 $('#info-activate').onclick = () => { const i = state.info; send({ cmd: i.stim > 0 ? 'deactivate' : 'activate', idx: [i.idx], rate: +$('#rate-slider').value, expand: state.scope }); setTimeout(() => send({ cmd: 'info', idx: i.idx }), 300); };
 $('#info-silence').onclick = () => { const i = state.info; send({ cmd: i.silenced ? 'unsilence' : 'silence', idx: [i.idx], expand: state.scope }); setTimeout(() => send({ cmd: 'info', idx: i.idx }), 300); };
 $('#info-synapses').onclick = () => showSynapses(state.info);
 $('#info-skeleton').onclick = () => showSkeleton(state.info.idx);
+$('#info-points').onclick = () => showSynapsePoints(state.info.idx);
+$('#new-day').onclick = () => { if (confirm('Забыть весь день: следы, лезии и связи всех посетителей?')) { send({ cmd: 'new_day' }); contactCache.clear(); } };
 
 function buildPresets() {
   const box = $('#presets');

@@ -31,6 +31,8 @@
   #info .stats b { color:var(--fg); font-weight:500; }
   #info .actions { display:flex; gap:6px; flex-wrap:wrap; }
   #hint { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); color:var(--dim); pointer-events:none; text-align:center; font-size:13px; }
+  #feed div { color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #feed div:last-child { color:var(--fg); }
   #legend { position:fixed; right:16px; bottom:16px; color:var(--dim); font-size:12px; display:grid; grid-template-columns:auto auto; gap:2px 8px; align-items:center; }
   #legend i { display:inline-block; width:10px; height:10px; border-radius:50%; }
   #status { position:fixed; left:50%; top:14px; transform:translateX(-50%); color:var(--dim); font-size:13px; }
@@ -45,6 +47,8 @@
   <div class="row">время модели <b id="t">0.00 с</b> · скорость <b id="speed">…</b></div>
   <div class="row">спайков/с <b id="rate">0</b> · активных нейронов <b id="active">0</b></div>
   <div class="row">возбуждено <b id="n-stim">0</b> · выключено <b id="n-sil">0</b> · ваших связей <b id="n-extra">0</b></div>
+  <div class="row" id="day">сегодня: <b id="day-actions">0</b> вмешательств · след в <b id="day-traced">0</b> нейронах</div>
+  <div id="feed" class="row" style="margin-top:6px; font-size:12px; max-width:420px"></div>
 </div>
 <div id="status"></div>
 
@@ -66,6 +70,7 @@
       <button id="reset" title="вернуть мозг в покой, оставить вмешательства">Покой</button>
       <button id="clear" class="danger" title="снять все вмешательства">Снять всё</button>
       <button id="toggle-scope">Тип клеток: обе стороны</button>
+      <button id="new-day" class="danger" title="забыть весь день: следы, лезии, связи">Новый день</button>
     </div>
   </div>
   <div class="panel">
@@ -81,6 +86,7 @@
     <button id="info-activate">Возбудить тип</button>
     <button id="info-silence">Выключить тип</button>
     <button id="info-synapses">Связи</button>
+    <button id="info-points">Синапсы</button>
     <button id="info-skeleton">Форма</button>
     <button id="info-close">×</button>
   </div>
