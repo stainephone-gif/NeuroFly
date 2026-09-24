@@ -20,7 +20,7 @@ const CLASS_RU = {
 const state = {
   meta: null, n: 0, pos: null, cls: null,
   act: null, flag: null, mode: 'look', scope: 'type',
-  selected: null, pendingPre: null, status: null, ws: null, lastFrameWall: 0,
+  selected: null, pendingPre: null, status: null, ws: null, lastFrameWall: 0, linkGroups: true,
 };
 
 // ------------------------------------------------------------------ scene
@@ -161,8 +161,8 @@ function onNeuronClick(i) {
     send({ cmd: state.status && state.silSet.has(i) ? 'unsilence' : 'silence', idx: [i], expand: state.scope });
   } else if (state.mode === 'connect') {
     if (state.pendingPre === null) { state.pendingPre = i; setStatus('выбран источник; щёлкните по цели'); select(i); return; }
-    send({ cmd: 'connect', pre: state.pendingPre, post: i, n: w, sign });
-    setStatus(`связь ${state.pendingPre} → ${i}: ${sign > 0 ? '+' : '−'}${w} синапсов`);
+    send({ cmd: 'connect', pre: state.pendingPre, post: i, n: w, sign, expand: state.linkGroups ? state.scope : null });
+    setStatus(state.linkGroups ? `связь тип → тип: ${sign > 0 ? '+' : '−'}${w} синапсов на пару` : `связь ${state.pendingPre} → ${i}: ${sign > 0 ? '+' : '−'}${w} синапсов`);
     state.pendingPre = null;
   }
   select(i);
@@ -235,16 +235,19 @@ async function showSynapsePoints(i) {
 }
 
 const contactCache = new Map();
+const MAX_CONTACT_DOTS = 80;
 async function drawContacts(list) {
-  // one bright dot where each hand-made synapse sits, plus the line
-  const pts = [];
-  for (const [a, b, w] of list) {
-    const key = `${a}-${b}`;
-    if (!contactCache.has(key)) {
-      try { contactCache.set(key, await (await fetch(`/api/contact/${a}/${b}`)).json()); } catch (e) { continue; }
-    }
-    pts.push([contactCache.get(key), w]);
+  // one bright dot where each hand-made synapse sits (first MAX_CONTACT_DOTS of them)
+  const shown = list.slice(0, MAX_CONTACT_DOTS);
+  const missing = shown.map(([a, b]) => `${a}-${b}`).filter((k) => !contactCache.has(k));
+  if (missing.length) {
+    try {
+      const got = await (await fetch(`/api/contacts?pairs=${missing.join(',')}`)).json();
+      for (const k in got) contactCache.set(k, got[k]);
+    } catch (e) { /* offline: no dots */ }
   }
+  const pts = [];
+  for (const [a, b, w] of shown) { const p = contactCache.get(`${a}-${b}`); if (p) pts.push([p, w]); }
   if (contactPoints) { scene.remove(contactPoints); contactPoints.geometry.dispose(); contactPoints = null; }
   if (!pts.length) return;
   const xyz = new Float32Array(pts.length * 3), col = new Float32Array(pts.length * 3);
@@ -322,7 +325,7 @@ function onStatus(s) {
   }
   $('#n-stim').textContent = s.n_stim; $('#n-sil').textContent = s.n_silenced; $('#n-extra').textContent = s.n_extra;
   $('#rate').textContent = Math.round(s.spikes_per_s); $('#active').textContent = s.active;
-  $('#speed').textContent = s.paused ? 'пауза' : `${s.realtime.toFixed(2)}× реального` + (s.awake >= 0 ? ` · не спят ${s.awake}` : '');
+  $('#speed').textContent = s.paused ? 'пауза' : `${s.realtime.toFixed(2)}× реального` + (s.speed < 0.999 ? ` (задано 1/${Math.round(1 / s.speed)})` : '') + (s.awake >= 0 ? ` · не спят ${s.awake}` : '');
   $('#pause').textContent = s.paused ? 'Пуск' : 'Пауза';
   for (const b of document.querySelectorAll('#presets button')) {
     const p = state.meta.presets[+b.dataset.k];
@@ -354,10 +357,15 @@ function setStatus(t) { $('#status').textContent = t; }
 for (const b of document.querySelectorAll('[data-mode]')) b.onclick = () => {
   state.mode = b.dataset.mode; state.pendingPre = null;
   for (const o of document.querySelectorAll('[data-mode]')) o.classList.toggle('on', o === b);
-  $('#hint').textContent = { look: 'щёлкните по нейрону, чтобы узнать, кто он', activate: 'щёлкните по нейрону: все клетки его типа получат стимул на 20 секунд', silence: 'щёлкните по нейрону: все клетки его типа замолчат', connect: 'щёлкните по источнику, затем по цели: появится новая связь' }[state.mode];
+  $('#hint').textContent = { look: 'щёлкните по нейрону, чтобы узнать, кто он', activate: 'щёлкните по нейрону: все клетки его типа получат стимул на 20 секунд', silence: 'щёлкните по нейрону: все клетки его типа замолчат', connect: 'щёлкните по источнику, затем по цели: все клетки их типов свяжутся' }[state.mode];
 };
 $('#rate-slider').oninput = (e) => $('#rate-out').textContent = `${e.target.value} Гц`;
 $('#w-slider').oninput = (e) => $('#w-out').textContent = e.target.value;
+$('#link-scope').onclick = () => { state.linkGroups = !state.linkGroups; const b = $('#link-scope'); b.classList.toggle('on', state.linkGroups); b.textContent = state.linkGroups ? 'Связь: тип → тип' : 'Связь: нейрон → нейрон'; };
+// slider 0..100 -> slow-down factor 1..50 (log scale); the server paces to 1/factor of real time
+const slowFactor = (v) => Math.round(Math.pow(50, v / 100) * 10) / 10;
+$('#speed-slider').oninput = (e) => { const f = slowFactor(+e.target.value); $('#speed-out').textContent = f <= 1 ? '1×' : `1/${f}`; };
+$('#speed-slider').onchange = (e) => { const f = slowFactor(+e.target.value); send({ cmd: 'speed', value: 1 / f }); };
 $('#sign').onclick = () => { const b = $('#sign'); const on = !b.classList.contains('on'); b.classList.toggle('on', on); b.textContent = on ? '+ возбуждающая' : '− тормозная'; };
 $('#pause').onclick = () => send({ cmd: state.status && state.status.paused ? 'play' : 'pause' });
 $('#reset').onclick = () => send({ cmd: 'reset' });

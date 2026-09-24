@@ -55,6 +55,7 @@ from .synapses import SynapseIndex
 from .traces import TraceParams, Traces
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+MAX_PAIRS_PER_CONNECT = 4000   # a type-to-type connection between two big types is sampled down to this
 
 
 # ------------------------------------------------------------------ presets
@@ -93,7 +94,10 @@ class Simulation(threading.Thread):
         self.frames: Queue = Queue(maxsize=64)
         self.paused = False
         self.speed = 1.0          # target bio seconds per wall second
-        self.realtime_ratio = 0.0  # measured bio / wall
+        self.realtime_ratio = 0.0  # measured bio / wall, pacing included
+        self.compute_ratio = 0.0   # bio / wall of the computation alone
+        self._last_start = None
+        self._ema_full = None
         self.spikes_per_s = 0.0
         self.active_recent = 0
         self.lock = threading.Lock()
@@ -106,9 +110,16 @@ class Simulation(threading.Thread):
         while True:
             self._drain_commands()
             if self.paused:
+                self._last_start = None
                 time.sleep(0.05)
                 continue
             t0 = time.perf_counter()
+            if self._last_start is not None:
+                # wall time per window including pacing: what the screen actually sees
+                full = t0 - self._last_start
+                self._ema_full = full if self._ema_full is None else 0.9 * self._ema_full + 0.1 * full
+                self.realtime_ratio = (self.window_ms / 1000) / max(self._ema_full, 1e-9)
+            self._last_start = t0
             with self.lock:
                 if b.fast:
                     _, ix = b.run_fast(self.window_steps)
@@ -126,7 +137,7 @@ class Simulation(threading.Thread):
                     self.traces.save()
             wall = time.perf_counter() - t0
             ema_wall = wall if ema_wall is None else 0.9 * ema_wall + 0.1 * wall
-            self.realtime_ratio = (self.window_ms / 1000) / max(ema_wall, 1e-9)
+            self.compute_ratio = (self.window_ms / 1000) / max(ema_wall, 1e-9)
             recent.append(idx)
             if len(recent) > int(1000 / self.window_ms):
                 recent.pop(0)
@@ -204,10 +215,18 @@ class Simulation(threading.Thread):
                     tr.log("unsilence", n=len(idx) if idx else -1)
             elif c == "connect":
                 pre, post = int(cmd["pre"]), int(cmd["post"])
-                b.connect(pre, post, float(cmd.get("n", 10)), int(cmd.get("sign", 1)))
+                n_syn, sign = float(cmd.get("n", 10)), int(cmd.get("sign", 1))
+                pres = self._expand([pre], cmd.get("expand"))
+                posts = [j for j in self._expand([post], cmd.get("expand")) if j not in set(pres)] or [post]
+                pairs = self._pair_groups(pres, posts, MAX_PAIRS_PER_CONNECT)
+                for i, j in pairs:
+                    b.connect(i, j, n_syn, sign)
                 if tr:
-                    tr.log("connect", pre=pre, post=post, n=float(cmd.get("n", 10)), sign=int(cmd.get("sign", 1)),
-                           label=f"{self._label([pre])} → {self._label([post])}")
+                    lab = f"{self._label([pre])} → {self._label([post])}"
+                    if len(pairs) > 1:
+                        lab += f" ({len(pres)}×{len(posts)})"
+                    tr.log("connect", pre=pre, post=post, n=n_syn, sign=sign, pairs=len(pairs), label=lab)
+                return {"type": "ack", "cmd": c, "n": len(pairs)}
             elif c == "disconnect":
                 pre, post = cmd.get("pre"), cmd.get("post")
                 b.disconnect(None if pre is None else int(pre), None if post is None else int(post))
@@ -240,6 +259,16 @@ class Simulation(threading.Thread):
             else:
                 return {"type": "error", "message": f"unknown command {c!r}"}
         return {"type": "ack", "cmd": c}
+
+    @staticmethod
+    def _pair_groups(pres, posts, cap):
+        """All pre x post pairs, or a random sample of ``cap`` when there are too many."""
+        total = len(pres) * len(posts)
+        if total <= cap:
+            return [(int(i), int(j)) for i in pres for j in posts]
+        rng = np.random.default_rng()
+        k = rng.choice(total, size=cap, replace=False)
+        return [(int(pres[t // len(posts)]), int(posts[t % len(posts)])) for t in k]
 
     def _label(self, idx) -> str:
         if not idx:
@@ -285,6 +314,7 @@ class Simulation(threading.Thread):
                 "paused": self.paused,
                 "speed": self.speed,
                 "realtime": self.realtime_ratio,
+                "compute": self.compute_ratio,
                 "spikes_per_s": self.spikes_per_s,
                 "active": self.active_recent,
                 "stim": [[int(i), float(b.stim_rate[i])] for i in stim[:5000]],
@@ -425,6 +455,14 @@ class GalleryServer:
             if path.startswith("/api/contact/"):
                 parts = path.split("/")
                 return resp(json.dumps(self.contact_point(int(parts[3]), int(parts[4]))).encode(), "application/json")
+            if path.startswith("/api/contacts"):
+                q = request.path.split("pairs=", 1)[1] if "pairs=" in request.path else ""
+                out = {}
+                for tok in q.split(",")[:120]:
+                    if "-" in tok:
+                        a, b_ = tok.split("-")
+                        out[tok] = self.contact_point(int(a), int(b_))
+                return resp(json.dumps(out).encode(), "application/json")
             if path == "/api/journal":
                 tr = self.sim.traces
                 return resp(json.dumps(tr.journal[-200:] if tr else []).encode(), "application/json")
