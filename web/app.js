@@ -160,7 +160,7 @@ function onNeuronClick(i) {
   } else if (state.mode === 'silence') {
     send({ cmd: state.status && state.silSet.has(i) ? 'unsilence' : 'silence', idx: [i], expand: state.scope });
   } else if (state.mode === 'connect') {
-    if (state.pendingPre === null) { state.pendingPre = i; setStatus('выбран источник; щёлкните по цели'); select(i); return; }
+    if (state.pendingPre === null) { state.pendingPre = i; setStatus('источник выбран, теперь щёлкните по цели'); select(i); return; }
     send({ cmd: 'connect', pre: state.pendingPre, post: i, n: w, sign, expand: state.linkGroups ? state.scope : null });
     setStatus(state.linkGroups ? `связь тип → тип: ${sign > 0 ? '+' : '−'}${w} синапсов на пару` : `связь ${state.pendingPre} → ${i}: ${sign > 0 ? '+' : '−'}${w} синапсов`);
     state.pendingPre = null;
@@ -354,19 +354,26 @@ function onInfo(info) {
 
 // ----------------------------------------------------------------- UI
 function setStatus(t) { $('#status').textContent = t; }
+const MODE_HINTS = {
+  look: 'Щёлкните по любой точке, чтобы узнать, что это за нейрон.',
+  activate: 'Щёлкните по нейрону: все клетки его типа начнут работать на 20 секунд. Ещё щелчок выключит стимул.',
+  silence: 'Щёлкните по нейрону: все клетки его типа замолчат, как после травмы. Ещё щелчок вернёт их.',
+  connect: 'Щёлкните по источнику, потом по цели: в мозге появится связь, которой не было.',
+};
 for (const b of document.querySelectorAll('[data-mode]')) b.onclick = () => {
   state.mode = b.dataset.mode; state.pendingPre = null;
   for (const o of document.querySelectorAll('[data-mode]')) o.classList.toggle('on', o === b);
-  $('#hint').textContent = { look: 'щёлкните по нейрону, чтобы узнать, кто он', activate: 'щёлкните по нейрону: все клетки его типа получат стимул на 20 секунд', silence: 'щёлкните по нейрону: все клетки его типа замолчат', connect: 'щёлкните по источнику, затем по цели: все клетки их типов свяжутся' }[state.mode];
+  $('#main-panel').dataset.mode = state.mode;
+  $('#mode-hint').textContent = MODE_HINTS[state.mode];
 };
-$('#rate-slider').oninput = (e) => $('#rate-out').textContent = `${e.target.value} Гц`;
+$('#rate-slider').oninput = (e) => $('#rate-out').textContent = e.target.value;
 $('#w-slider').oninput = (e) => $('#w-out').textContent = e.target.value;
-$('#link-scope').onclick = () => { state.linkGroups = !state.linkGroups; const b = $('#link-scope'); b.classList.toggle('on', state.linkGroups); b.textContent = state.linkGroups ? 'Связь: тип → тип' : 'Связь: нейрон → нейрон'; };
+$('#link-scope').onclick = () => { state.linkGroups = !state.linkGroups; const b = $('#link-scope'); b.classList.toggle('on', state.linkGroups); b.textContent = state.linkGroups ? 'все клетки этих типов' : 'только эти два нейрона'; };
 // slider 0..100 -> slow-down factor 1..50 (log scale); the server paces to 1/factor of real time
 const slowFactor = (v) => Math.round(Math.pow(50, v / 100) * 10) / 10;
 $('#speed-slider').oninput = (e) => { const f = slowFactor(+e.target.value); $('#speed-out').textContent = f <= 1 ? '1×' : `1/${f}`; };
 $('#speed-slider').onchange = (e) => { const f = slowFactor(+e.target.value); send({ cmd: 'speed', value: 1 / f }); };
-$('#sign').onclick = () => { const b = $('#sign'); const on = !b.classList.contains('on'); b.classList.toggle('on', on); b.textContent = on ? '+ возбуждающая' : '− тормозная'; };
+$('#sign').onclick = () => { const b = $('#sign'); const on = !b.classList.contains('on'); b.classList.toggle('on', on); b.textContent = on ? '+ возбуждать цель' : '− тормозить цель'; };
 $('#pause').onclick = () => send({ cmd: state.status && state.status.paused ? 'play' : 'pause' });
 $('#reset').onclick = () => send({ cmd: 'reset' });
 $('#clear').onclick = () => { send({ cmd: 'clear' }); setLines(synLines, new Float32Array(0), new Float32Array(0)); setLines(skeletonLines, new Float32Array(0), new Float32Array(0)); setSynPoints(new Float32Array(0), new Float32Array(0)); };
