@@ -86,16 +86,17 @@ class Traces:
         b, p = self.brain, self.p
         self.day_spikes += int(spiked.size)
         if p.alpha > 0 and spiked.size:
-            counts = np.bincount(spiked, minlength=b.n)
-            hit = np.flatnonzero(counts)
-            b.gain[hit] = np.minimum(p.gain_max, b.gain[hit] + p.alpha * counts[hit])
-        if p.tau_h > 0:
-            decay = np.exp(-(window_ms / 1000.0) / (p.tau_h * 3600.0))
-            # decay lazily: only traced neurons matter
+            hit, n = np.unique(spiked, return_counts=True)
+            b.gain[hit] = np.minimum(p.gain_max, b.gain[hit] + p.alpha * n)
+        self._pending_ms = getattr(self, "_pending_ms", 0.0) + window_ms
+        if p.tau_h > 0 and self._pending_ms >= 1000.0:
+            decay = np.exp(-(self._pending_ms / 1000.0) / (p.tau_h * 3600.0))
+            self._pending_ms = 0.0
             traced = b.gain != 1.0
             if traced.any():
-                b.gain[traced] = 1.0 + (b.gain[traced] - 1.0) * decay
-                b.gain[np.abs(b.gain - 1.0) < 1e-6] = 1.0
+                g = 1.0 + (b.gain[traced] - 1.0) * decay
+                g[np.abs(g - 1.0) < 1e-6] = 1.0
+                b.gain[traced] = g
         expired = []
         if self.expires:
             now = time.time()

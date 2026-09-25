@@ -51,7 +51,7 @@ class Params:
     t_dly: float = 1.8    # synaptic delay, ms
     w_syn: float = 0.275  # weight of one synapse, mV (the one free parameter)
     f_poi: float = 250.0  # Poisson kick = w_syn * f_poi mV
-    eps: float = 1e-2     # mV; below this a neuron counts as "at rest" (fast path only)
+    eps: float = 0.2      # mV; below this a neuron counts as "at rest" (fast path only; 3 % of the 7 mV gap to threshold)
 
     def steps(self, t_ms: float) -> int:
         return int(round(t_ms / self.dt))
@@ -448,8 +448,11 @@ class FlyBrain:
             self._refresh_awake()
         e_indptr, e_indices, e_data = self._extra_csc()
         cap = max_spikes or max(200_000, 400 * n_steps)
-        out_t = np.zeros(cap, dtype=np.int64)
-        out_i = np.zeros(cap, dtype=np.int64)
+        if getattr(self, "_out_cap", 0) < cap:
+            self._out_t = np.empty(cap, dtype=np.int64)
+            self._out_i = np.empty(cap, dtype=np.int64)
+            self._out_cap = cap
+        out_t, out_i = self._out_t, self._out_i
         W = self.W
         n_awake, n_out = _fast.run_window(
             int(n_steps), int(self.k),
@@ -465,7 +468,7 @@ class FlyBrain:
         )
         self._n_awake = int(n_awake)
         self.k += int(n_steps)
-        return out_t[:n_out], out_i[:n_out]
+        return out_t[:n_out].copy(), out_i[:n_out].copy()
 
     @property
     def n_awake(self) -> int:

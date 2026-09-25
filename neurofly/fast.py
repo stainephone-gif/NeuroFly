@@ -31,12 +31,12 @@ except ImportError:  # pragma: no cover
         return deco if not (a and callable(a[0])) else a[0]
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def seed(s: int) -> None:
     np.random.seed(s)
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def run_window(
     n_steps, k0,
     v, g, last_spike, rfc_steps, silenced, gain,

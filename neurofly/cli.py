@@ -105,7 +105,7 @@ def cmd_serve(args: argparse.Namespace) -> None:
     tp = TraceParams(hold_s=args.hold, alpha=args.trace_alpha, gain_max=args.trace_max, tau_h=args.trace_tau)
     serve_main(host=args.host, port=args.port, window_ms=args.window, seed=args.seed,
                data_dir=args.data_dir, release=args.release, prefetch_meshes=not args.no_meshes,
-               fresh=args.fresh, synapse_points=not args.no_synapses, trace_params=tp)
+               fresh=args.fresh, synapse_points=not args.no_synapses, trace_params=tp, eps=args.eps)
 
 
 def cmd_archive(args: argparse.Namespace) -> None:
@@ -164,6 +164,7 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--trace-alpha", type=float, default=1e-4, help="gain added to a neuron's outputs per spike (0 = off)")
     s.add_argument("--trace-max", type=float, default=1.6, help="ceiling of the use trace")
     s.add_argument("--trace-tau", type=float, default=8.0, help="hours for the trace to decay by 1/e")
+    s.add_argument("--eps", type=float, default=None, help="mV below which a neuron sleeps (default 0.2; 0.01 is exact but 2x slower)")
     s.set_defaults(func=cmd_serve)
 
     a = sub.add_parser("archive", help="prefetch the public FlyWire archive (meshes, skeletons) for offline use")
