@@ -323,6 +323,7 @@ function onStatus(s) {
       return `<div>${t} · ${verb[e.action] || e.action} ${what}</div>`;
     }).join('');
   }
+  renderTranslation();
   $('#n-stim').textContent = s.n_stim; $('#n-sil').textContent = s.n_silenced; $('#n-extra').textContent = s.n_extra;
   $('#rate').textContent = Math.round(s.spikes_per_s); $('#active').textContent = s.active;
   $('#speed').textContent = s.paused ? 'пауза' : `${s.realtime.toFixed(2)}× реального` + (s.speed < 0.999 ? ` (задано 1/${Math.round(1 / s.speed)})` : '') + (s.awake >= 0 ? ` · не спят ${s.awake}` : '');
@@ -352,8 +353,43 @@ function onInfo(info) {
   $('#info-silence').textContent = info.silenced ? 'Включить тип' : 'Выключить тип';
 }
 
+// ------------------------------------------------------- translation
+const tr = { open: false, vocab: null, vocabName: 'Шаурма' };
+async function loadVocab() {
+  try { tr.vocab = await (await fetch('/vocab.json')).json(); } catch (e) { tr.vocab = null; }
+  if (!tr.vocab) return;
+  const names = Object.keys(tr.vocab.idle);
+  $('#tr-vocab').innerHTML = names.map((n) => `<button data-v="${n}" class="${n === tr.vocabName ? 'on' : ''}">${n}</button>`).join('');
+  for (const b of document.querySelectorAll('#tr-vocab button')) b.onclick = () => { tr.vocabName = b.dataset.v; for (const o of document.querySelectorAll('#tr-vocab button')) o.classList.toggle('on', o === b); renderTranslation(); };
+  $('#tr-json').textContent = JSON.stringify(Object.fromEntries(Object.entries(tr.vocab.words).map(([k, v]) => [k, v[tr.vocabName]])), null, 1);
+}
+function renderTranslation() {
+  if (!tr.open || !state.status || !state.meta) return;
+  const rates = state.status.channels || {};
+  const chans = state.meta.channels;
+  $('#tr-brain').innerHTML = chans.map((c) => {
+    const r = rates[c.key] || 0, f = Math.min(1, r / c.ref);
+    return `<div class="tr-row ${c.role === 'вход' ? 'in' : ''}"><span>${c.label}</span><b>${r.toFixed(0)} Гц</b><div class="tr-bar"><i style="width:${(f * 100).toFixed(0)}%"></i></div></div>`;
+  }).join('');
+  if (!tr.vocab) return;
+  // the wrapper's rule: the output channel with the highest normalised rate wins
+  let best = null, bestF = 0.15;
+  for (const c of chans) {
+    if (c.role !== 'выход') continue;
+    const f = (rates[c.key] || 0) / c.ref;
+    if (f > bestF) { best = c.key; bestF = f; }
+  }
+  const words = tr.vocab.words, name = tr.vocabName;
+  $('#tr-action').textContent = best ? (words[best] && words[best][name]) || best : tr.vocab.idle[name];
+  $('#tr-words').innerHTML = chans.map((c) => `<div class="${c.key === best ? 'on' : ''}">${c.label.split(',')[0]} → ${(words[c.key] && words[c.key][name]) || '—'}</div>`).join('');
+  $('#tr-json').textContent = JSON.stringify(Object.fromEntries(Object.entries(words).map(([k, v]) => [k, v[name]])), null, 1);
+}
+
 // ----------------------------------------------------------------- UI
 function setStatus(t) { $('#status').textContent = t; }
+$('#tr-open').onclick = () => { tr.open = true; $('#translate').style.display = 'block'; $('#legend').style.display = 'none'; if (!tr.vocab) loadVocab().then(renderTranslation); else renderTranslation(); };
+$('#tr-close').onclick = () => { tr.open = false; $('#translate').style.display = 'none'; $('#legend').style.display = ''; };
+$('#tr-edit').onclick = () => { const j = $('#tr-json'); j.style.display = j.style.display === 'none' ? 'block' : 'none'; };
 const MODE_HINTS = {
   look: 'Щёлкните по любой точке, чтобы узнать, что это за нейрон.',
   activate: 'Щёлкните по нейрону: все клетки его типа начнут работать на 20 секунд. Ещё щелчок выключит стимул.',
