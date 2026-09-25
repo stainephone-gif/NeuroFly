@@ -80,6 +80,28 @@ def build_presets(brain: FlyBrain, atlas: Atlas) -> list[dict]:
     return presets
 
 
+def build_channels(brain: FlyBrain, atlas: Atlas) -> list[dict]:
+    """Named readouts of the brain: groups whose firing rate the screen reports honestly."""
+    def idx(ids):
+        return [int(i) for i in brain.index(ids)]
+
+    ch = [
+        {"key": "sugar", "label": "вкусовые нейроны сахара", "role": "вход", "idx": idx(N.named("sugar", brain.release)), "ref": 200},
+        {"key": "mn9", "label": "MN9, мотонейрон хоботка", "role": "выход", "idx": idx([N.MN9]), "ref": 90},
+        {"key": "p9", "label": "DNp09, команда «вперёд»", "role": "выход", "idx": idx(N.P9), "ref": 100},
+    ]
+    for key, label, ct, side, ref in [
+        ("mdn", "MDN, задний ход", "MDN", None, 100),
+        ("dna02_l", "DNa02 слева, поворот", "DNa02", "left", 100),
+        ("dna02_r", "DNa02 справа, поворот", "DNa02", "right", 100),
+        ("gf", "DNp01, гигантское волокно, прыжок", "DNp01", None, 100),
+    ]:
+        members = atlas.by_type(ct, side)
+        if members.size:
+            ch.append({"key": key, "label": label, "role": "выход", "idx": [int(i) for i in members], "ref": ref})
+    return ch
+
+
 # --------------------------------------------------------------- simulation
 class Simulation(threading.Thread):
     """Runs the brain in its own thread; talks to asyncio through queues."""
@@ -102,6 +124,8 @@ class Simulation(threading.Thread):
         self.active_recent = 0
         self.lock = threading.Lock()
         self.window_steps = brain.p.steps(window_ms)
+        self.channels = build_channels(brain, atlas)
+        self._recent: list[np.ndarray] = []
 
     def run(self) -> None:
         b = self.brain
@@ -144,6 +168,7 @@ class Simulation(threading.Thread):
             allr = np.concatenate(recent) if recent else idx
             self.spikes_per_s = len(allr) / (len(recent) * self.window_ms / 1000)
             self.active_recent = int(np.unique(allr).size)
+            self._recent = recent
             frame = struct.pack("<ffI", t_ms, self.window_ms, idx.size) + idx.tobytes()
             try:
                 self.frames.put_nowait(frame)
@@ -304,6 +329,16 @@ class Simulation(threading.Thread):
             "gain": float(b.gain[i]),
         }
 
+    def channel_rates(self) -> dict:
+        """Mean rate (Hz) over the last second for every named channel."""
+        recent = self._recent
+        if not recent:
+            return {c["key"]: 0.0 for c in self.channels}
+        allr = np.concatenate(recent)
+        secs = len(recent) * self.window_ms / 1000
+        counts = np.bincount(allr, minlength=self.brain.n)
+        return {c["key"]: float(counts[c["idx"]].mean() / secs) for c in self.channels}
+
     def status(self) -> dict:
         b = self.brain
         with self.lock:
@@ -323,6 +358,7 @@ class Simulation(threading.Thread):
                 "n_silenced": int(b.silenced.sum()),
                 "extra": [[int(pre), int(p), float(w)] for pre, (posts, ws) in b.extra.items() for p, w in zip(posts, ws)][:5000],
                 "n_extra": b.n_extra(),
+                "channels": self.channel_rates(),
                 "awake": int(b.n_awake) if b.fast else -1,
                 "fast": bool(b.fast),
                 "traces": self.traces.summary() if self.traces else None,
@@ -374,6 +410,7 @@ class GalleryServer:
                 "nts": list(map(str, df["nt"].astype("category").cat.categories)),
                 "bounds": [pos.min(0).tolist(), pos.max(0).tolist()],
                 "presets": self.presets,
+                "channels": [{k: v for k, v in c.items() if k != "idx"} | {"n": len(c["idx"])} for c in self.sim.channels],
                 "neuropils": NEUROPILS,
                 "window_ms": self.sim.window_ms,
                 "n_connections": int(self.brain.W.nnz),

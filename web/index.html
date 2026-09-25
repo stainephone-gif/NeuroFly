@@ -40,6 +40,22 @@
   #hint { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); color:var(--dim); pointer-events:none; text-align:center; font-size:13px; }
   #feed div { color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #feed div:last-child { color:var(--fg); }
+  #translate { position:fixed; right:16px; bottom:16px; width:min(94vw, 560px); display:none; }
+  .tr-head { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .tr-head b { font-size:15px; }
+  .tr-vocab { display:flex; gap:4px; flex:1; flex-wrap:wrap; }
+  .tr-vocab button { padding:4px 8px; font-size:12px; }
+  .tr-cols { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .tr-row { display:grid; grid-template-columns:1fr auto; gap:6px; font-size:12px; color:var(--dim); margin:3px 0; }
+  .tr-row b { color:var(--fg); font-weight:500; font-variant-numeric:tabular-nums; }
+  .tr-bar { grid-column:1 / -1; height:3px; background:rgba(255,255,255,.08); border-radius:2px; overflow:hidden; }
+  .tr-bar i { display:block; height:100%; background:var(--acc); width:0; transition:width .3s; }
+  .tr-row.in .tr-bar i { background:var(--cyan); }
+  .tr-action { font-size:22px; font-weight:600; margin:4px 0 10px; min-height:1.3em; }
+  #tr-words div { font-size:12px; color:var(--dim); margin:2px 0; }
+  #tr-words div.on { color:var(--fg); }
+  .link { color:var(--acc); cursor:pointer; text-decoration:underline; }
+  #tr-json { font-size:11px; color:var(--dim); white-space:pre-wrap; max-height:180px; overflow:auto; margin:6px 0 0; }
   #legend { position:fixed; right:16px; bottom:16px; color:var(--dim); font-size:12px; display:grid; grid-template-columns:auto auto; gap:2px 8px; align-items:center; }
   #legend i { display:inline-block; width:10px; height:10px; border-radius:50%; }
   #status { position:fixed; left:50%; top:14px; transform:translateX(-50%); color:var(--dim); font-size:13px; }
@@ -96,6 +112,7 @@
   <div class="panel">
     <div class="caption" style="margin:0 0 6px">Готовые сценарии</div>
     <div class="presets" id="presets"></div>
+    <div class="modes" style="margin-top:8px"><button id="tr-open">Перевод: что «делает» муха</button></div>
   </div>
 </div>
 
@@ -113,6 +130,26 @@
   </div>
 </div>
 
+<div id="translate" class="panel">
+  <div class="tr-head">
+    <b>Перевод</b>
+    <span class="tr-vocab" id="tr-vocab"></span>
+    <button id="tr-close">×</button>
+  </div>
+  <div class="tr-cols">
+    <div>
+      <div class="caption">что происходит в мозге</div>
+      <div id="tr-brain"></div>
+    </div>
+    <div>
+      <div class="caption">что говорит обвязка</div>
+      <div id="tr-action" class="tr-action">…</div>
+      <div id="tr-words"></div>
+    </div>
+  </div>
+  <div class="caption" id="tr-note">Левый столбец меняет только мозг. Правый — двенадцать строк текста, которые можно переписать во что угодно: <span id="tr-edit" class="link">посмотреть</span>.</div>
+  <pre id="tr-json" style="display:none"></pre>
+</div>
 <div id="hint">колесо: масштаб · перетаскивание: вращение</div>
 <div id="legend"></div>
 <script type="module" src="./app.js"></script>
