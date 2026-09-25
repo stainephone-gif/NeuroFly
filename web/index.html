@@ -23,6 +23,13 @@
   .sliders output { color:var(--fg); min-width:5ch; text-align:right; font-variant-numeric: tabular-nums; }
   input[type=range] { width:100%; accent-color: var(--acc); }
   .presets { display:flex; gap:6px; flex-wrap:wrap; }
+  .hint { color:var(--fg); margin:8px 0 2px; font-size:13px; min-height:1.3em; }
+  .caption { grid-column: 1 / -1; color:var(--dim); font-size:12px; margin-top:-2px; }
+  .only-activate, .only-connect { display:none; }
+  #main-panel[data-mode="activate"] .only-activate { display:grid; }
+  #main-panel[data-mode="connect"] .only-connect { display:grid; }
+  details summary { color:var(--dim); cursor:pointer; margin-top:8px; font-size:13px; user-select:none; }
+  details[open] summary { color:var(--fg); }
   .presets button.stim { border-color:var(--cyan); color:var(--cyan); }
   #info { position:fixed; right:16px; top:14px; width:min(92vw, 360px); display:none; }
   #info h2 { margin:0 0 4px; font-size:16px; font-weight:600; }
@@ -53,28 +60,41 @@
 <div id="status"></div>
 
 <div id="tools">
-  <div class="panel">
+  <div class="panel" id="main-panel" data-mode="look">
     <div class="modes">
       <button data-mode="look" class="on">Смотреть</button>
       <button data-mode="activate">Возбудить</button>
       <button data-mode="silence">Выключить</button>
       <button data-mode="connect">Связать</button>
     </div>
-    <div class="sliders">
-      <span>частота</span><input id="rate-slider" type="range" min="10" max="300" step="10" value="100"><output id="rate-out">100 Гц</output>
-      <span>сила связи</span><input id="w-slider" type="range" min="1" max="200" step="1" value="30"><output id="w-out">30</output>
-      <span>знак</span><div><button id="sign" class="on">+ возбуждающая</button> <button id="link-scope" class="on">Связь: тип → тип</button></div><span></span>
-      <span>время</span><input id="speed-slider" type="range" min="0" max="100" step="1" value="0"><output id="speed-out">1×</output>
+    <div id="mode-hint" class="hint">Щёлкните по любой точке, чтобы узнать, что это за нейрон.</div>
+    <div class="sliders only-activate">
+      <span>сила стимула</span><input id="rate-slider" type="range" min="10" max="300" step="10" value="100"><output id="rate-out">100</output>
+      <div class="caption">импульсов в секунду. 100 — как настоящий вкус, 300 — очень сильно</div>
     </div>
-    <div class="modes" style="margin-top:8px">
-      <button id="pause">Пауза</button>
-      <button id="reset" title="вернуть мозг в покой, оставить вмешательства">Покой</button>
-      <button id="clear" class="danger" title="снять все вмешательства">Снять всё</button>
-      <button id="toggle-scope">Тип клеток: обе стороны</button>
-      <button id="new-day" class="danger" title="забыть весь день: следы, лезии, связи">Новый день</button>
+    <div class="sliders only-connect">
+      <span>толщина связи</span><input id="w-slider" type="range" min="1" max="200" step="1" value="30"><output id="w-out">30</output>
+      <div class="caption">синапсов на каждую пару нейронов. У настоящих связей обычно от 1 до 50</div>
+      <span>действие</span><div><button id="sign" class="on">+ возбуждать цель</button></div><span></span>
+      <span>кого</span><div><button id="link-scope" class="on">все клетки этих типов</button></div><span></span>
     </div>
+    <details id="settings">
+      <summary>Настройки</summary>
+      <div class="sliders">
+        <span>время</span><input id="speed-slider" type="range" min="0" max="100" step="1" value="0"><output id="speed-out">1×</output>
+        <div class="caption">замедлить, чтобы разглядеть волну спайков</div>
+      </div>
+      <div class="modes" style="margin-top:8px">
+        <button id="pause">Пауза</button>
+        <button id="reset" title="вернуть мозг в покой, оставить вмешательства">Успокоить</button>
+        <button id="toggle-scope">Тип клеток: обе стороны</button>
+        <button id="clear" class="danger" title="снять все стимулы, лезии и связи">Снять всё</button>
+        <button id="new-day" class="danger" title="забыть весь день: следы, лезии, связи">Новый день</button>
+      </div>
+    </details>
   </div>
   <div class="panel">
+    <div class="caption" style="margin:0 0 6px">Готовые сценарии</div>
     <div class="presets" id="presets"></div>
   </div>
 </div>
@@ -93,7 +113,7 @@
   </div>
 </div>
 
-<div id="hint">щёлкните по нейрону · колесо: масштаб · перетаскивание: вращение</div>
+<div id="hint">колесо: масштаб · перетаскивание: вращение</div>
 <div id="legend"></div>
 <script type="module" src="./app.js"></script>
 </body>

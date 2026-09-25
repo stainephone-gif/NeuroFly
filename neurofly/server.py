@@ -65,18 +65,18 @@ def build_presets(brain: FlyBrain, atlas: Atlas) -> list[dict]:
         return [int(i) for i in brain.index(ids)]
 
     presets = [
-        {"key": "sugar", "label": "Вкус сахара", "hint": "21 вкусовой нейрон → хоботок (MN9)", "idx": idx(N.named("sugar", brain.release)), "rate": 200},
-        {"key": "p9", "label": "DNp09: вперёд", "hint": "нисходящие нейроны, команда идти вперёд", "idx": idx(N.P9), "rate": 100},
+        {"key": "sugar", "label": "Дать сахар", "hint": "21 вкусовой нейрон на лапке; муха вытягивает хоботок", "idx": idx(N.named("sugar", brain.release)), "rate": 200},
+        {"key": "p9", "label": "Идти вперёд", "hint": "DNp09: нисходящие нейроны, команда ходьбы", "idx": idx(N.P9), "rate": 100},
     ]
     for key, label, hint, rate in [
-        ("MDN", "MDN: назад", "нисходящие нейроны, задний ход", 100),
-        ("DNa02", "DNa02: поворот", "нисходящие нейроны поворота", 100),
-        ("DNp01", "Гигантское волокно", "рефлекс прыжка от угрозы", 100),
+        ("MDN", "Пятиться", "MDN: нисходящие нейроны заднего хода", 100),
+        ("DNa02", "Повернуть", "DNa02: нисходящие нейроны поворота", 100),
+        ("DNp01", "Испугать", "гигантское волокно: рефлекс прыжка от угрозы", 100),
     ]:
         members = atlas.by_type(key)
         if members.size:
             presets.append({"key": key, "label": label, "hint": hint, "idx": [int(i) for i in members], "rate": rate})
-    presets.append({"key": "mn9", "label": "MN9: хоботок", "hint": "мотонейрон хоботка, наблюдаемый выход", "idx": idx([N.MN9]), "rate": 0})
+    presets.append({"key": "mn9", "label": "Найти хоботок", "hint": "MN9: мотонейрон хоботка, по нему видно, сработал ли вкус", "idx": idx([N.MN9]), "rate": 0})
     return presets
 
 
