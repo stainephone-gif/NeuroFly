@@ -328,9 +328,11 @@ function onStatus(s) {
   $('#rate').textContent = Math.round(s.spikes_per_s); $('#active').textContent = s.active;
   $('#speed').textContent = s.paused ? 'пауза' : `${s.realtime.toFixed(2)}× реального` + (s.speed < 0.999 ? ` (задано 1/${Math.round(1 / s.speed)})` : '') + (s.awake >= 0 ? ` · не спят ${s.awake}` : '');
   $('#pause').textContent = s.paused ? 'Пуск' : 'Пауза';
+  $('#pause').classList.toggle('on', !!s.paused);
   for (const b of document.querySelectorAll('#presets button')) {
     const p = state.meta.presets[+b.dataset.k];
     b.classList.toggle('stim', p.rate > 0 && p.idx.some((i) => state.stimMap.has(i)));
+    b.classList.toggle('sel', p.rate === 0 && state.selected !== null && p.idx.includes(state.selected));
   }
 }
 
@@ -387,8 +389,15 @@ function renderTranslation() {
 
 // ----------------------------------------------------------------- UI
 function setStatus(t) { $('#status').textContent = t; }
-$('#tr-open').onclick = () => { tr.open = true; $('#translate').style.display = 'block'; $('#legend').style.display = 'none'; if (!tr.vocab) loadVocab().then(renderTranslation); else renderTranslation(); };
-$('#tr-close').onclick = () => { tr.open = false; $('#translate').style.display = 'none'; $('#legend').style.display = ''; };
+function setTranslation(open) {
+  tr.open = open;
+  $('#translate').style.display = open ? 'block' : 'none';
+  $('#legend').style.display = open ? 'none' : '';
+  $('#tr-open').classList.toggle('on', open);
+  if (open) { if (!tr.vocab) loadVocab().then(renderTranslation); else renderTranslation(); }
+}
+$('#tr-open').onclick = () => setTranslation(!tr.open);
+$('#tr-close').onclick = () => setTranslation(false);
 $('#tr-edit').onclick = () => { const j = $('#tr-json'); j.style.display = j.style.display === 'none' ? 'block' : 'none'; };
 const MODE_HINTS = {
   look: 'Щёлкните по любой точке, чтобы узнать, что это за нейрон.',

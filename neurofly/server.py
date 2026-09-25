@@ -121,16 +121,18 @@ class Simulation(threading.Thread):
         self._last_start = None
         self._ema_full = None
         self.spikes_per_s = 0.0
-        self.active_recent = 0
         self.lock = threading.Lock()
         self.window_steps = brain.p.steps(window_ms)
         self.channels = build_channels(brain, atlas)
-        self._recent: list[np.ndarray] = []
+        self._counts = np.zeros(brain.n, dtype=np.int64)
 
     def run(self) -> None:
         b = self.brain
         ema_wall = None
-        recent = []
+        n_keep = max(1, int(round(1000 / self.window_ms)))   # windows in the last second
+        recent: list[np.ndarray] = []
+        counts = np.zeros(b.n, dtype=np.int64)                 # spikes per neuron, last second
+        total = 0
         while True:
             self._drain_commands()
             if self.paused:
@@ -162,13 +164,18 @@ class Simulation(threading.Thread):
             wall = time.perf_counter() - t0
             ema_wall = wall if ema_wall is None else 0.9 * ema_wall + 0.1 * wall
             self.compute_ratio = (self.window_ms / 1000) / max(ema_wall, 1e-9)
+            # rolling one-second statistics, updated incrementally
             recent.append(idx)
-            if len(recent) > int(1000 / self.window_ms):
-                recent.pop(0)
-            allr = np.concatenate(recent) if recent else idx
-            self.spikes_per_s = len(allr) / (len(recent) * self.window_ms / 1000)
-            self.active_recent = int(np.unique(allr).size)
-            self._recent = recent
+            if idx.size:
+                np.add.at(counts, idx, 1)
+            total += idx.size
+            if len(recent) > n_keep:
+                old = recent.pop(0)
+                if old.size:
+                    np.add.at(counts, old, -1)
+                total -= old.size
+            self._counts = counts
+            self.spikes_per_s = total / (len(recent) * self.window_ms / 1000)
             frame = struct.pack("<ffI", t_ms, self.window_ms, idx.size) + idx.tobytes()
             try:
                 self.frames.put_nowait(frame)
@@ -331,13 +338,8 @@ class Simulation(threading.Thread):
 
     def channel_rates(self) -> dict:
         """Mean rate (Hz) over the last second for every named channel."""
-        recent = self._recent
-        if not recent:
-            return {c["key"]: 0.0 for c in self.channels}
-        allr = np.concatenate(recent)
-        secs = len(recent) * self.window_ms / 1000
-        counts = np.bincount(allr, minlength=self.brain.n)
-        return {c["key"]: float(counts[c["idx"]].mean() / secs) for c in self.channels}
+        counts = self._counts
+        return {c["key"]: float(counts[c["idx"]].mean()) for c in self.channels}
 
     def status(self) -> dict:
         b = self.brain
@@ -351,7 +353,7 @@ class Simulation(threading.Thread):
                 "realtime": self.realtime_ratio,
                 "compute": self.compute_ratio,
                 "spikes_per_s": self.spikes_per_s,
-                "active": self.active_recent,
+                "active": int(np.count_nonzero(self._counts)),
                 "stim": [[int(i), float(b.stim_rate[i])] for i in stim[:5000]],
                 "n_stim": int(stim.size),
                 "silenced": [int(i) for i in np.flatnonzero(b.silenced)[:5000]],
@@ -586,8 +588,10 @@ class GalleryServer:
 
 def main(host: str = "0.0.0.0", port: int = 8765, window_ms: float = 10.0, seed: int | None = None,
          data_dir=None, release=None, prefetch_meshes: bool = True, fresh: bool = False,
-         synapse_points: bool = True, trace_params: TraceParams | None = None) -> None:
-    brain = load_brain(data_dir, seed=seed, release=release)
+         synapse_points: bool = True, trace_params: TraceParams | None = None, eps: float | None = None) -> None:
+    from .model import Params
+    params = Params(eps=eps) if eps is not None else None
+    brain = load_brain(data_dir, seed=seed, release=release, params=params)
     atlas = Atlas(brain.ids, data_dir)
     if prefetch_meshes:
         from .archive import fetch_meshes
