@@ -290,8 +290,12 @@ class Simulation(threading.Thread):
             elif c == "connect":
                 pre, post = int(cmd["pre"]), int(cmd["post"])
                 n_syn, sign = float(cmd.get("n", 10)), int(cmd.get("sign", 1))
-                pres = self._expand([pre], cmd.get("expand"))
-                posts = [j for j in self._expand([post], cmd.get("expand")) if j not in set(pres)] or [post]
+                if cmd.get("pres") and cmd.get("posts"):   # explicit groups (used by the tour)
+                    pres = [int(i) for i in cmd["pres"]]
+                    posts = [int(j) for j in cmd["posts"]]
+                else:
+                    pres = self._expand([pre], cmd.get("expand"))
+                    posts = [j for j in self._expand([post], cmd.get("expand")) if j not in set(pres)] or [post]
                 pairs = self._pair_groups(pres, posts, MAX_PAIRS_PER_CONNECT)
                 for i, j in pairs:
                     b.connect(i, j, n_syn, sign)
@@ -456,7 +460,7 @@ class GalleryServer:
                 "nts": list(map(str, df["nt"].astype("category").cat.categories)),
                 "bounds": [pos.min(0).tolist(), pos.max(0).tolist()],
                 "presets": self.presets,
-                "channels": [{k: v for k, v in c.items() if k != "idx"} | {"n": len(c["idx"])} for c in self.sim.channels],
+                "channels": [{k: v for k, v in c.items() if k != "idx"} | {"n": len(c["idx"]), "idx": c["idx"] if len(c["idx"]) <= 8 else []} for c in self.sim.channels],
                 "neuropils": NEUROPILS,
                 "window_ms": self.sim.window_ms,
                 "n_connections": int(self.brain.W.nnz),

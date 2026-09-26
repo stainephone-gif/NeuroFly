@@ -399,6 +399,106 @@ function updateStage(best, action) {
   }
 }
 
+// ----------------------------------------------------------------- tour
+const camGoal = { active: false, target: new THREE.Vector3(), pos: new THREE.Vector3() };
+function focusOn(idx, distance = 420) {
+  if (idx === null || idx === undefined) { camGoal.active = false; return; }
+  const p = new THREE.Vector3(state.pos[3 * idx], state.pos[3 * idx + 1], state.pos[3 * idx + 2]);
+  camGoal.target.copy(p);
+  const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+  camGoal.pos.copy(p).addScaledVector(dir, distance);
+  camGoal.active = true;
+}
+function presetIdx(key) {
+  const p = state.meta.presets.find((q) => q.key === key);
+  if (p) return p.idx;
+  const c = state.meta.channels && state.meta.channels.find((q) => q.key === key);   // e.g. mn9
+  return c && c.idx ? c.idx : [];
+}
+let TOUR = [];
+async function loadTour() {
+  try {
+    const j = await (await fetch('/tour.json')).json();
+    TOUR = j.parts.flatMap((p) => p.steps.map((st) => ({ ...st, part: p.name })));
+  } catch (e) { TOUR = []; }
+}
+const tour = {
+  i: -1,
+  scenario(key, on) {
+    const p = state.meta.presets.find((q) => q.key === key); if (!p) return;
+    send({ cmd: on ? 'activate' : 'deactivate', idx: p.idx, rate: p.rate, hold: 0 });
+  },
+  connect(fromKey, toKey) {
+    const a = presetIdx(fromKey), b = presetIdx(toKey); if (!a.length || !b.length) return;
+    send({ cmd: 'connect', pre: a[0], post: b[0], pres: a, posts: b, n: 30, sign: 1 });
+  },
+  async run(ops) {
+    for (const op of ops || []) {
+      const [name, x, y] = op;
+      if (name === 'scenario') this.scenario(x, y);
+      else if (name === 'connect') this.connect(x, y);
+      else if (name === 'disconnect') send({ cmd: 'disconnect' });
+      else if (name === 'wait') await new Promise((r) => setTimeout(r, x));
+      else if (name === 'info') {
+        if (!state.info) continue;
+        if (x === 'lines') showSynapses(state.info);
+        else if (x === 'skeleton') showSkeleton(state.info.idx);
+        else if (x === 'points') showSynapsePoints(state.info.idx);
+      } else if (name === 'overlays') {
+        setLines(synLines, new Float32Array(0), new Float32Array(0));
+        setLines(skeletonLines, new Float32Array(0), new Float32Array(0));
+        setSynPoints(new Float32Array(0), new Float32Array(0));
+      } else if (name === 'memes') { $('#memes').open = !!x; }
+      else if (name === 'vocab') { const b = document.querySelector(`#tr-vocab button[data-v="${x}"]`); if (b) b.click(); }
+      else if (name === 'json') { $('#tr-json').style.display = x ? 'block' : 'none'; }
+    }
+  },
+  async start() {
+    if (!TOUR.length) await loadTour();
+    if (!TOUR.length) { setStatus('экскурсия не загрузилась'); return; }
+    controls.autoRotate = false;
+    send({ cmd: 'clear' });
+    $('#tour').style.display = 'block'; $('#tour-start').classList.add('on'); document.body.classList.add('touring');
+    this.i = -1; this.next();
+  },
+  stop() {
+    this.i = -1; $('#tour').style.display = 'none'; $('#tour-start').classList.remove('on'); document.body.classList.remove('touring');
+    send({ cmd: 'clear' }); camGoal.active = false;
+    this.run([['overlays', 'clear'], ['json', false], ['vocab', 'Муха'], ['memes', false]]);
+    selectMarker.visible = false;
+  },
+  async next() {
+    this.i += 1;
+    if (this.i >= TOUR.length) { this.stop(); return; }
+    const st = TOUR[this.i];
+    setStatus('');
+    await this.run(st.before);
+    $('#tour-title').textContent = st.title; $('#tour-step').textContent = `${st.part} · ${this.i + 1} / ${TOUR.length}`;
+    $('#tour-text').textContent = st.text; $('#tour-after').textContent = '';
+    const act = $('#tour-action');
+    act.style.display = st.action ? '' : 'none';
+    if (st.action) { act.textContent = st.action; act.disabled = false; }
+    $('#tour-next').textContent = st.last ? 'Закончить' : (st.next || 'Дальше');
+    $('#tour-next').style.display = st.action ? 'none' : '';
+    const fi = st.focus ? presetIdx(st.focus)[0] : null;
+    if (fi !== null && fi !== undefined) {
+      focusOn(fi);
+      if (!state.info || state.info.idx !== fi) { setLines(synLines, new Float32Array(0), new Float32Array(0)); select(fi); }
+    } else if (!st.keepFocus) { camGoal.active = false; }
+    if (st.lines) { const li = presetIdx(st.lines)[0]; if (li !== undefined) setTimeout(() => { if (state.info && state.info.idx === li) showSynapses(state.info); }, 700); }
+  },
+  async act() {
+    const st = TOUR[this.i]; if (!st || !st.action) return;
+    $('#tour-action').disabled = true;
+    await this.run(st.ops);
+    setTimeout(() => { $('#tour-after').textContent = st.after || ''; $('#tour-next').style.display = ''; }, st.wait || 2500);
+  },
+};
+$('#tour-start').onclick = () => (tour.i >= 0 ? tour.stop() : tour.start());
+$('#tour-close').onclick = () => tour.stop();
+$('#tour-next').onclick = () => tour.next();
+$('#tour-action').onclick = () => tour.act();
+
 // ------------------------------------------------------- translation
 const tr = { open: false, vocab: null, vocabName: 'Муха' };
 const FLY_TAB = 'Муха';
@@ -511,7 +611,11 @@ async function main() {
     for (let i = 0; i < act.length; i++) if (act[i] > 0.002) act[i] *= decay; else act[i] = 0;
     points.geometry.attributes.act.needsUpdate = true;
     if (state.tModel !== undefined) $('#t').textContent = `${(state.tModel / 1000).toFixed(2)} с`;
-    if (!controls.autoRotate && now - idleSince > 45000) controls.autoRotate = true;
+    if (!controls.autoRotate && now - idleSince > 45000 && tour.i < 0) controls.autoRotate = true;
+    if (camGoal.active) {
+      controls.target.lerp(camGoal.target, 0.06); camera.position.lerp(camGoal.pos, 0.06);
+      if (camera.position.distanceTo(camGoal.pos) < 1) camGoal.active = false;
+    }
     pointMat.uniforms.uScale.value = innerHeight / 2;
     if (tr.vocabName === FLY_TAB) { arena.step(Math.min(dt, 0.1)); $('#arena-action').textContent = arena.action; }
     controls.update();
