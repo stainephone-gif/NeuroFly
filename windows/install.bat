@@ -1,7 +1,9 @@
 @echo off
+chcp 65001 >NUL
 rem NeuroFly: one-time setup on Windows. Run from the project folder (double-click is fine).
 setlocal
 cd /d "%~dp0.."
+set PYTHONPATH=%CD%
 echo === NeuroFly setup ===
 
 where python >NUL 2>&1
@@ -21,10 +23,10 @@ echo Installing NeuroFly and dependencies...
 ".venv\Scripts\python.exe" -m pip install -e ".[gallery]" || (echo pip install failed & pause & exit /b 1)
 
 echo Downloading the connectome (about 105 MB) and building the cache...
-".venv\Scripts\neurofly.exe" download || (echo download failed & pause & exit /b 1)
+".venv\Scripts\python.exe" -m neurofly.cli download || (echo download failed & pause & exit /b 1)
 
 echo Fetching the neuron atlas and the brain outline...
-".venv\Scripts\neurofly.exe" archive --meshes || (echo archive failed & pause & exit /b 1)
+".venv\Scripts\python.exe" -m neurofly.cli archive --meshes || (echo archive failed & pause & exit /b 1)
 
 echo.
 echo Done. Start the installation with start.bat

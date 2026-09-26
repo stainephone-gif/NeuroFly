@@ -511,12 +511,28 @@ class GalleryServer:
                 from urllib.parse import unquote
                 hits = self.atlas.search(unquote(q), limit=30)
                 return resp(hits.to_json(orient="records").encode(), "application/json")
-            local = (WEB_DIR / path.lstrip("/")).resolve()
+            from urllib.parse import unquote
+            local = (WEB_DIR / unquote(path).lstrip("/")).resolve()
             if WEB_DIR in local.parents and local.is_file():
                 ctype = mimetypes.guess_type(str(local))[0] or "application/octet-stream"
                 if local.suffix == ".js":
                     ctype = "text/javascript"
-                return resp(local.read_bytes(), ctype)
+                size = local.stat().st_size
+                rng = request.headers.get("Range")
+                if rng and rng.startswith("bytes="):
+                    a, _, b_ = rng[6:].partition("-")
+                    start = int(a) if a else max(0, size - int(b_))
+                    end = min(size - 1, int(b_)) if (a and b_) else size - 1
+                    with open(local, "rb") as f:
+                        f.seek(start)
+                        body = f.read(end - start + 1)
+                    h = Headers([("Content-Type", ctype), ("Content-Length", str(len(body))),
+                                 ("Content-Range", f"bytes {start}-{end}/{size}"), ("Accept-Ranges", "bytes"),
+                                 ("Cache-Control", "no-cache")])
+                    return Response(206, "Partial Content", h, body)
+                r = resp(local.read_bytes(), ctype)
+                r.headers["Accept-Ranges"] = "bytes"
+                return r
             return resp(b"not found", "text/plain", 404)
         except Exception as e:
             return resp(f"error: {e}".encode(), "text/plain", 500)
