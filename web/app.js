@@ -444,7 +444,7 @@ loadVocab().then(renderTranslation);
 $('#tr-edit').onclick = () => { const j = $('#tr-json'); j.style.display = j.style.display === 'none' ? 'block' : 'none'; };
 const MODE_HINTS = {
   look: 'Щёлкните по любой точке, чтобы узнать, что это за нейрон. Сценарии ниже включают настоящие входы мозга.',
-  connect: 'Щёлкните по источнику, потом по цели: в мозге появится связь, которой не было. Потом запустите сценарий и смотрите на муху.',
+  connect: 'Щёлкните по нейрону-источнику, потом по нейрону-цели: между ними появится связь, которой в мозге не было. Потом запустите сценарий и смотрите на муху.',
 };
 for (const b of document.querySelectorAll('button[data-mode]')) b.onclick = () => {
   state.mode = b.dataset.mode; state.pendingPre = null;
@@ -463,7 +463,7 @@ $('#sign').onclick = () => { const b = $('#sign'); const on = !b.classList.conta
 $('#pause').onclick = () => send({ cmd: state.status && state.status.paused ? 'play' : 'pause' });
 $('#reset').onclick = () => send({ cmd: 'reset' });
 $('#clear').onclick = () => { send({ cmd: 'clear' }); setLines(synLines, new Float32Array(0), new Float32Array(0)); setLines(skeletonLines, new Float32Array(0), new Float32Array(0)); setSynPoints(new Float32Array(0), new Float32Array(0)); };
-$('#toggle-scope').onclick = () => { state.scope = state.scope === 'type' ? 'type_side' : 'type'; $('#toggle-scope').textContent = state.scope === 'type' ? 'Тип клеток: обе стороны' : 'Тип клеток: одна сторона'; };
+$('#toggle-scope').onclick = () => { state.scope = state.scope === 'type' ? 'type_side' : 'type'; $('#toggle-scope').textContent = state.scope === 'type' ? 'обе стороны' : 'одна сторона'; };
 $('#info-close').onclick = () => { $('#info').style.display = 'none'; selectMarker.visible = false; };
 $('#info-synapses').onclick = () => showSynapses(state.info);
 $('#info-skeleton').onclick = () => showSkeleton(state.info.idx);
