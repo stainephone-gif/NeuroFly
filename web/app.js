@@ -441,9 +441,9 @@ const MODE_HINTS = {
   look: 'Щёлкните по любой точке, чтобы узнать, что это за нейрон. Сценарии ниже включают настоящие входы мозга.',
   connect: 'Щёлкните по источнику, потом по цели: в мозге появится связь, которой не было. Потом запустите сценарий и смотрите на муху.',
 };
-for (const b of document.querySelectorAll('[data-mode]')) b.onclick = () => {
+for (const b of document.querySelectorAll('button[data-mode]')) b.onclick = () => {
   state.mode = b.dataset.mode; state.pendingPre = null;
-  for (const o of document.querySelectorAll('[data-mode]')) o.classList.toggle('on', o === b);
+  for (const o of document.querySelectorAll('button[data-mode]')) o.classList.toggle('on', o === b);
   $('#main-panel').dataset.mode = state.mode;
   $('#mode-hint').textContent = MODE_HINTS[state.mode];
 };
