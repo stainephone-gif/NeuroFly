@@ -37,9 +37,10 @@ export class FlyArena {
     if (this.c.width !== w * dpr) { this.c.width = w * dpr; this.c.height = h * dpr; this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
     return [w, h];
   }
-  level(key) {
+  level(key, dt = 1 / 60) {
     const r = BODY_RULES[key], raw = clamp01((this.rates[r.channel] || 0) / r.ref);
-    const s = this.smooth[key] === undefined ? raw : this.smooth[key] + (raw - this.smooth[key]) * 0.15;
+    const k = 1 - Math.exp(-dt / 0.25);   // time-based smoothing, independent of frame rate
+    const s = this.smooth[key] === undefined ? raw : this.smooth[key] + (raw - this.smooth[key]) * k;
     this.smooth[key] = s;
     return s;
   }
@@ -47,9 +48,9 @@ export class FlyArena {
     const [w, h] = this.resize();
     const R = Math.min(w, h) / 2 - 36;
     this.t += dt;
-    const fwd = this.level('forward'), back = this.level('backward');
-    const tl = this.level('turnLeft'), tr = this.level('turnRight');
-    const prob = this.level('proboscis'), taste = this.level('taste');
+    const fwd = this.level('forward', dt), back = this.level('backward', dt);
+    const tl = this.level('turnLeft', dt), tr = this.level('turnRight', dt);
+    const prob = this.level('proboscis', dt), taste = this.level('taste', dt);
     const gf = this.rates.gf || 0;
     if (gf >= BODY_RULES.jump.threshold && this.lastGf < BODY_RULES.jump.threshold && this.jumpT < 0) {
       this.jumpT = 0;

@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { FlyArena } from './fly.js';
+import { TOUR } from './tour.js';
 
 const $ = (s) => document.querySelector(s);
 const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
@@ -399,6 +400,68 @@ function updateStage(best, action) {
   }
 }
 
+// ----------------------------------------------------------------- tour
+const camGoal = { active: false, target: new THREE.Vector3(), pos: new THREE.Vector3() };
+function focusOn(idx, distance = 420) {
+  if (idx === null || idx === undefined) { camGoal.active = false; return; }
+  const p = new THREE.Vector3(state.pos[3 * idx], state.pos[3 * idx + 1], state.pos[3 * idx + 2]);
+  camGoal.target.copy(p);
+  const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+  camGoal.pos.copy(p).addScaledVector(dir, distance);
+  camGoal.active = true;
+}
+function presetIdx(key) { const p = state.meta.presets.find((q) => q.key === key); return p ? p.idx : []; }
+const tour = {
+  i: -1,
+  scenario(key, on) {
+    const p = state.meta.presets.find((q) => q.key === key); if (!p) return;
+    send({ cmd: on ? 'activate' : 'deactivate', idx: p.idx, rate: p.rate, hold: 0 });
+  },
+  connect(fromKey, toKey) {
+    const a = presetIdx(fromKey), b = presetIdx(toKey); if (!a.length || !b.length) return;
+    send({ cmd: 'connect', pre: a[0], post: b[0], pres: a, posts: b, n: 30, sign: 1 });
+  },
+  disconnectAll() { send({ cmd: 'disconnect' }); },
+  start() {
+    controls.autoRotate = false;
+    send({ cmd: 'clear' });
+    $('#tour').style.display = 'block'; $('#tour-start').classList.add('on'); document.body.classList.add('touring');
+    this.i = -1; this.next();
+  },
+  stop() {
+    this.i = -1; $('#tour').style.display = 'none'; $('#tour-start').classList.remove('on'); document.body.classList.remove('touring');
+    send({ cmd: 'clear' }); camGoal.active = false;
+    setLines(synLines, new Float32Array(0), new Float32Array(0)); selectMarker.visible = false;
+  },
+  next() {
+    this.i += 1;
+    if (this.i >= TOUR.length) { this.stop(); return; }
+    const st = TOUR[this.i];
+    if (st.before) st.before(this);
+    $('#tour-title').textContent = st.title; $('#tour-step').textContent = `${this.i + 1} / ${TOUR.length}`;
+    $('#tour-text').textContent = st.text; $('#tour-after').textContent = '';
+    const act = $('#tour-action');
+    act.style.display = st.action ? '' : 'none';
+    if (st.action) { act.textContent = st.action.label; act.disabled = false; }
+    $('#tour-next').textContent = st.last ? 'Закончить' : 'Дальше';
+    $('#tour-next').style.display = st.action ? 'none' : '';
+    setLines(synLines, new Float32Array(0), new Float32Array(0));
+    const fi = st.focus ? presetIdx(st.focus)[0] : null;
+    if (fi !== null && fi !== undefined) { focusOn(fi); select(fi); } else { camGoal.active = false; selectMarker.visible = false; $('#info').style.display = 'none'; }
+    if (st.lines) { const li = presetIdx(st.lines)[0]; if (li !== undefined) setTimeout(() => { if (state.info && state.info.idx === li) showSynapses(state.info); }, 700); }
+  },
+  act() {
+    const st = TOUR[this.i]; if (!st || !st.action) return;
+    st.action.run(this);
+    $('#tour-action').disabled = true;
+    setTimeout(() => { $('#tour-after').textContent = st.after || ''; $('#tour-next').style.display = ''; }, st.title === 'Тот же сахар, другая муха' || st.title === 'Наоборот' ? 3500 : 2500);
+  },
+};
+$('#tour-start').onclick = () => (tour.i >= 0 ? tour.stop() : tour.start());
+$('#tour-close').onclick = () => tour.stop();
+$('#tour-next').onclick = () => tour.next();
+$('#tour-action').onclick = () => tour.act();
+
 // ------------------------------------------------------- translation
 const tr = { open: false, vocab: null, vocabName: 'Муха' };
 const FLY_TAB = 'Муха';
@@ -511,7 +574,11 @@ async function main() {
     for (let i = 0; i < act.length; i++) if (act[i] > 0.002) act[i] *= decay; else act[i] = 0;
     points.geometry.attributes.act.needsUpdate = true;
     if (state.tModel !== undefined) $('#t').textContent = `${(state.tModel / 1000).toFixed(2)} с`;
-    if (!controls.autoRotate && now - idleSince > 45000) controls.autoRotate = true;
+    if (!controls.autoRotate && now - idleSince > 45000 && tour.i < 0) controls.autoRotate = true;
+    if (camGoal.active) {
+      controls.target.lerp(camGoal.target, 0.06); camera.position.lerp(camGoal.pos, 0.06);
+      if (camera.position.distanceTo(camGoal.pos) < 1) camGoal.active = false;
+    }
     pointMat.uniforms.uScale.value = innerHeight / 2;
     if (tr.vocabName === FLY_TAB) { arena.step(Math.min(dt, 0.1)); $('#arena-action').textContent = arena.action; }
     controls.update();
