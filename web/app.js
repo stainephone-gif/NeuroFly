@@ -358,14 +358,51 @@ function onInfo(info) {
 // ------------------------------------------------------------ the fly
 const arena = new FlyArena(document.querySelector('#fly'));
 
+// ---------------------------------------------- stage: fly or meme video
+const FLY_WORDS = { sugar: 'пробует лапкой', mn9: 'вытягивает хоботок', p9: 'идёт вперёд', mdn: 'пятится', dna02_l: 'поворачивает влево', dna02_r: 'поворачивает вправо', gf: 'прыгает' };
+const stage = { clip: null };
+function videoFor(name, key) {
+  const v = tr.vocab && tr.vocab.videos && tr.vocab.videos[name];
+  if (!v) return null;
+  if (typeof v === 'string') return v;
+  return v[key] || v.idle || null;
+}
+function setStage() {
+  const meme = tr.vocabName !== FLY_TAB;
+  $('#fly').style.display = meme ? 'none' : 'block';
+  $('#meme-video').style.display = meme ? 'block' : 'none';
+  $('#meme-caption').style.display = meme ? 'block' : 'none';
+  $('#arena-title').textContent = meme ? tr.vocabName : 'Муха';
+  $('#arena-action').textContent = meme ? 'так это выглядит в ролике' : arena.action;
+  $('#arena-note').textContent = meme
+    ? 'Ролик из интернета. Подпись берётся из словаря мема: это всё, что связывает видео с мозгом.'
+    : 'Телом управляют только каналы мозга: DNp09 вперёд, MDN назад, DNa02 повороты, MN9 хоботок, DNp01 прыжок. Проведите новую связь, и походка изменится.';
+  if (!meme) { const v = $('#meme-video'); v.pause(); v.removeAttribute('src'); v.load(); stage.clip = null; $('#meme-missing').style.display = 'none'; }
+}
+function updateStage(best, action) {
+  if (tr.vocabName === FLY_TAB) return;
+  $('#meme-caption').textContent = action;
+  const file = videoFor(tr.vocabName, best);
+  const v = $('#meme-video');
+  if (!file) { v.style.display = 'none'; $('#meme-missing').style.display = 'flex'; $('#meme-missing').textContent = `нет видео для «${tr.vocabName}»: укажите файл в web/vocab.json`; return; }
+  if (stage.clip !== file) {
+    stage.clip = file;
+    v.style.display = 'block'; $('#meme-missing').style.display = 'none';
+    v.src = `/memes/${encodeURIComponent(file)}`;
+    v.onerror = () => { v.style.display = 'none'; $('#meme-missing').style.display = 'flex'; $('#meme-missing').textContent = `положите файл web/memes/${file}`; };
+    v.play().catch(() => {});
+  }
+}
+
 // ------------------------------------------------------- translation
-const tr = { open: false, vocab: null, vocabName: 'Шаурма' };
+const tr = { open: false, vocab: null, vocabName: 'Муха' };
+const FLY_TAB = 'Муха';
 async function loadVocab() {
   try { tr.vocab = await (await fetch('/vocab.json')).json(); } catch (e) { tr.vocab = null; }
   if (!tr.vocab) return;
-  const names = Object.keys(tr.vocab.idle);
+  const names = [FLY_TAB, ...Object.keys(tr.vocab.idle)];
   $('#tr-vocab').innerHTML = names.map((n) => `<button data-v="${n}" class="${n === tr.vocabName ? 'on' : ''}">${n}</button>`).join('');
-  for (const b of document.querySelectorAll('#tr-vocab button')) b.onclick = () => { tr.vocabName = b.dataset.v; for (const o of document.querySelectorAll('#tr-vocab button')) o.classList.toggle('on', o === b); renderTranslation(); };
+  for (const b of document.querySelectorAll('#tr-vocab button')) b.onclick = () => { tr.vocabName = b.dataset.v; for (const o of document.querySelectorAll('#tr-vocab button')) o.classList.toggle('on', o === b); setStage(); renderTranslation(); };
   $('#tr-json').textContent = JSON.stringify(Object.fromEntries(Object.entries(tr.vocab.words).map(([k, v]) => [k, v[tr.vocabName]])), null, 1);
 }
 function renderTranslation() {
@@ -384,10 +421,15 @@ function renderTranslation() {
     const f = (rates[c.key] || 0) / c.ref;
     if (f > bestF) { best = c.key; bestF = f; }
   }
-  const words = tr.vocab.words, name = tr.vocabName;
-  $('#tr-action').textContent = best ? (words[best] && words[best][name]) || best : tr.vocab.idle[name];
-  $('#tr-words').innerHTML = chans.map((c) => `<div class="${c.key === best ? 'on' : ''}">${c.label.split(',')[0]} → ${(words[c.key] && words[c.key][name]) || '—'}</div>`).join('');
-  $('#tr-json').textContent = JSON.stringify(Object.fromEntries(Object.entries(words).map(([k, v]) => [k, v[name]])), null, 1);
+  const name = tr.vocabName;
+  const words = name === FLY_TAB ? FLY_WORDS : tr.vocab.words;
+  const idle = name === FLY_TAB ? 'стоит' : tr.vocab.idle[name];
+  const word = (k) => name === FLY_TAB ? FLY_WORDS[k] : (words[k] && words[k][name]);
+  const action = best ? word(best) || best : idle;
+  $('#tr-action').textContent = action;
+  $('#tr-words').innerHTML = chans.map((c) => `<div class="${c.key === best ? 'on' : ''}">${c.label.split(',')[0]} → ${word(c.key) || '—'}</div>`).join('');
+  $('#tr-json').textContent = JSON.stringify(Object.fromEntries(chans.map((c) => [c.key, word(c.key) || ''])), null, 1);
+  updateStage(best, action);
 }
 
 // ----------------------------------------------------------------- UI
@@ -466,7 +508,7 @@ async function main() {
     if (state.tModel !== undefined) $('#t').textContent = `${(state.tModel / 1000).toFixed(2)} с`;
     if (!controls.autoRotate && now - idleSince > 45000) controls.autoRotate = true;
     pointMat.uniforms.uScale.value = innerHeight / 2;
-    arena.step(Math.min(dt, 0.1)); $('#arena-action').textContent = arena.action;
+    if (tr.vocabName === FLY_TAB) { arena.step(Math.min(dt, 0.1)); $('#arena-action').textContent = arena.action; }
     controls.update();
     renderer.render(scene, camera);
   });

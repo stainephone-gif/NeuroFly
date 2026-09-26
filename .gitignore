@@ -14,3 +14,7 @@ dist/
 venv/
 .pytest_cache/
 .ipynb_checkpoints/
+
+# meme videos live on the gallery machine, not in git
+web/memes/*
+!web/memes/README.md
