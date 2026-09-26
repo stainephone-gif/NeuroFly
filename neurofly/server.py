@@ -460,7 +460,7 @@ class GalleryServer:
                 "nts": list(map(str, df["nt"].astype("category").cat.categories)),
                 "bounds": [pos.min(0).tolist(), pos.max(0).tolist()],
                 "presets": self.presets,
-                "channels": [{k: v for k, v in c.items() if k != "idx"} | {"n": len(c["idx"])} for c in self.sim.channels],
+                "channels": [{k: v for k, v in c.items() if k != "idx"} | {"n": len(c["idx"]), "idx": c["idx"] if len(c["idx"]) <= 8 else []} for c in self.sim.channels],
                 "neuropils": NEUROPILS,
                 "window_ms": self.sim.window_ms,
                 "n_connections": int(self.brain.W.nnz),
