@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >NUL
 rem Helper for start.bat: waits until the server answers, then opens the screen.
 setlocal
 set PORT=%1
