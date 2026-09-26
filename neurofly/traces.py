@@ -81,11 +81,11 @@ class Traces:
         }
 
     # ------------------------------------------------------- per window
-    def after_window(self, spiked: np.ndarray, window_ms: float) -> list[int]:
+    def after_window(self, spiked: np.ndarray, window_ms: float, learn: bool = True) -> list[int]:
         """Update traces and expire activations. Returns neurons switched off."""
         b, p = self.brain, self.p
         self.day_spikes += int(spiked.size)
-        if p.alpha > 0 and spiked.size:
+        if learn and p.alpha > 0 and spiked.size:
             hit, n = np.unique(spiked, return_counts=True)
             b.gain[hit] = np.minimum(p.gain_max, b.gain[hit] + p.alpha * n)
         self._pending_ms = getattr(self, "_pending_ms", 0.0) + window_ms
