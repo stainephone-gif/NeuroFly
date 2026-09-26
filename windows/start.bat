@@ -17,7 +17,7 @@ rem numba keeps its compiled cache in a plain ASCII path (Cyrillic folders can b
 set NUMBA_CACHE_DIR=%TEMP%\neurofly_numba
 set PYTHONIOENCODING=utf-8
 
-if not exist ".venv\Scripts\python.exe" -m neurofly.cli (
+if not exist ".venv\Scripts\python.exe" (
   echo NeuroFly is not installed yet. Run install.bat first.
   pause
   exit /b 1
