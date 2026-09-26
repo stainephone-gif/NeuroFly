@@ -1,6 +1,7 @@
 // NeuroFly gallery screen: 138k neurons as a living point cloud.
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
+import { FlyArena } from './fly.js';
 
 const $ = (s) => document.querySelector(s);
 const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
@@ -282,6 +283,7 @@ function connect() {
     if (ev.data instanceof ArrayBuffer) { onFrame(ev.data); return; }
     const msg = JSON.parse(ev.data);
     if (msg.type === 'status') onStatus(msg);
+    else if (msg.type === 'channels') { arena.setRates(msg.rates); if (state.status) { state.status.channels = msg.rates; renderTranslation(); } }
     else if (msg.type === 'info') onInfo(msg);
     else if (msg.type === 'error') setStatus('ошибка: ' + msg.message);
   };
@@ -351,9 +353,10 @@ function onInfo(info) {
   st.push(['состояние', info.silenced ? 'выключен' : info.stim > 0 ? `возбуждён ${info.stim} Гц` : 'обычное']);
   if (info.gain && Math.abs(info.gain - 1) > 0.001) st.push(['след дня', `выходы × ${info.gain.toFixed(3)}`]);
   $('#info-stats').innerHTML = st.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('');
-  $('#info-activate').textContent = info.stim > 0 ? 'Снять возбуждение' : 'Возбудить тип';
-  $('#info-silence').textContent = info.silenced ? 'Включить тип' : 'Выключить тип';
 }
+
+// ------------------------------------------------------------ the fly
+const arena = new FlyArena(document.querySelector('#fly'));
 
 // ------------------------------------------------------- translation
 const tr = { open: false, vocab: null, vocabName: 'Шаурма' };
@@ -389,21 +392,12 @@ function renderTranslation() {
 
 // ----------------------------------------------------------------- UI
 function setStatus(t) { $('#status').textContent = t; }
-function setTranslation(open) {
-  tr.open = open;
-  $('#translate').style.display = open ? 'block' : 'none';
-  $('#legend').style.display = open ? 'none' : '';
-  $('#tr-open').classList.toggle('on', open);
-  if (open) { if (!tr.vocab) loadVocab().then(renderTranslation); else renderTranslation(); }
-}
-$('#tr-open').onclick = () => setTranslation(!tr.open);
-$('#tr-close').onclick = () => setTranslation(false);
+tr.open = true;
+loadVocab().then(renderTranslation);
 $('#tr-edit').onclick = () => { const j = $('#tr-json'); j.style.display = j.style.display === 'none' ? 'block' : 'none'; };
 const MODE_HINTS = {
-  look: 'Щёлкните по любой точке, чтобы узнать, что это за нейрон.',
-  activate: 'Щёлкните по нейрону: все клетки его типа начнут работать на 20 секунд. Ещё щелчок выключит стимул.',
-  silence: 'Щёлкните по нейрону: все клетки его типа замолчат, как после травмы. Ещё щелчок вернёт их.',
-  connect: 'Щёлкните по источнику, потом по цели: в мозге появится связь, которой не было.',
+  look: 'Щёлкните по любой точке, чтобы узнать, что это за нейрон. Сценарии ниже включают настоящие входы мозга.',
+  connect: 'Щёлкните по источнику, потом по цели: в мозге появится связь, которой не было. Потом запустите сценарий и смотрите на муху.',
 };
 for (const b of document.querySelectorAll('[data-mode]')) b.onclick = () => {
   state.mode = b.dataset.mode; state.pendingPre = null;
@@ -424,8 +418,6 @@ $('#reset').onclick = () => send({ cmd: 'reset' });
 $('#clear').onclick = () => { send({ cmd: 'clear' }); setLines(synLines, new Float32Array(0), new Float32Array(0)); setLines(skeletonLines, new Float32Array(0), new Float32Array(0)); setSynPoints(new Float32Array(0), new Float32Array(0)); };
 $('#toggle-scope').onclick = () => { state.scope = state.scope === 'type' ? 'type_side' : 'type'; $('#toggle-scope').textContent = state.scope === 'type' ? 'Тип клеток: обе стороны' : 'Тип клеток: одна сторона'; };
 $('#info-close').onclick = () => { $('#info').style.display = 'none'; selectMarker.visible = false; };
-$('#info-activate').onclick = () => { const i = state.info; send({ cmd: i.stim > 0 ? 'deactivate' : 'activate', idx: [i.idx], rate: +$('#rate-slider').value, expand: state.scope }); setTimeout(() => send({ cmd: 'info', idx: i.idx }), 300); };
-$('#info-silence').onclick = () => { const i = state.info; send({ cmd: i.silenced ? 'unsilence' : 'silence', idx: [i.idx], expand: state.scope }); setTimeout(() => send({ cmd: 'info', idx: i.idx }), 300); };
 $('#info-synapses').onclick = () => showSynapses(state.info);
 $('#info-skeleton').onclick = () => showSkeleton(state.info.idx);
 $('#info-points').onclick = () => showSynapsePoints(state.info.idx);
@@ -437,13 +429,17 @@ function buildPresets() {
     const b = document.createElement('button');
     b.textContent = p.label; b.title = p.hint; b.dataset.k = k;
     b.onclick = () => {
-      if (p.rate > 0) send({ cmd: b.classList.contains('stim') ? 'deactivate' : 'activate', idx: p.idx, rate: p.rate });
+      if (p.rate > 0) {
+        const on = b.classList.contains('stim');
+        send({ cmd: on ? 'deactivate' : 'activate', idx: p.idx, rate: p.rate });
+        b.classList.toggle('stim', !on);   // immediate feedback; the next status confirms
+      }
       select(p.idx[0]);
     };
     box.appendChild(b);
   });
   const lg = $('#legend');
-  lg.innerHTML = state.meta.super_classes.map((c) => `<i style="background:${CLASS_COLORS[c] || '#777'}"></i><span>${CLASS_RU[c] || c}</span>`).join('');
+  lg.innerHTML = state.meta.super_classes.filter((c) => c).map((c) => `<span><i style="background:${CLASS_COLORS[c] || '#777'}"></i>${CLASS_RU[c] || c}</span>`).join('');
 }
 
 // ---------------------------------------------------------------- main
@@ -470,6 +466,7 @@ async function main() {
     if (state.tModel !== undefined) $('#t').textContent = `${(state.tModel / 1000).toFixed(2)} с`;
     if (!controls.autoRotate && now - idleSince > 45000) controls.autoRotate = true;
     pointMat.uniforms.uScale.value = innerHeight / 2;
+    arena.step(Math.min(dt, 0.1)); $('#arena-action').textContent = arena.action;
     controls.update();
     renderer.render(scene, camera);
   });

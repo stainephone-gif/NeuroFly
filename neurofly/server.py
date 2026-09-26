@@ -68,15 +68,14 @@ def build_presets(brain: FlyBrain, atlas: Atlas) -> list[dict]:
         {"key": "sugar", "label": "Дать сахар", "hint": "21 вкусовой нейрон на лапке; муха вытягивает хоботок", "idx": idx(N.named("sugar", brain.release)), "rate": 200},
         {"key": "p9", "label": "Идти вперёд", "hint": "DNp09: нисходящие нейроны, команда ходьбы", "idx": idx(N.P9), "rate": 100},
     ]
-    for key, label, hint, rate in [
-        ("MDN", "Пятиться", "MDN: нисходящие нейроны заднего хода", 100),
-        ("DNa02", "Повернуть", "DNa02: нисходящие нейроны поворота", 100),
-        ("DNp01", "Испугать", "гигантское волокно: рефлекс прыжка от угрозы", 100),
+    for key, label, hint, rate, side in [
+        ("MDN", "Пятиться", "MDN: нисходящие нейроны заднего хода", 100, None),
+        ("DNa02", "Повернуть", "DNa02 слева: нисходящий нейрон поворота одной стороны", 100, "left"),
+        ("DNp01", "Испугать", "гигантское волокно: рефлекс прыжка от угрозы", 100, None),
     ]:
-        members = atlas.by_type(key)
+        members = atlas.by_type(key, side)
         if members.size:
             presets.append({"key": key, "label": label, "hint": hint, "idx": [int(i) for i in members], "rate": rate})
-    presets.append({"key": "mn9", "label": "Найти хоботок", "hint": "MN9: мотонейрон хоботка, по нему видно, сработал ли вкус", "idx": idx([N.MN9]), "rate": 0})
     return presets
 
 
@@ -564,6 +563,7 @@ class GalleryServer:
     async def pump(self) -> None:
         """Move frames from the simulation thread to the sockets."""
         last_status = 0.0
+        last_channels = 0.0
         while True:
             try:
                 frame = self.sim.frames.get_nowait()
@@ -573,6 +573,9 @@ class GalleryServer:
             if self.clients:
                 await self.broadcast(frame)
                 now = time.time()
+                if now - last_channels > 0.1:
+                    last_channels = now
+                    await self.broadcast(json.dumps({"type": "channels", "rates": self.sim.channel_rates()}))
                 if now - last_status > 0.5:
                     last_status = now
                     await self.broadcast(json.dumps(self.sim.status()))
