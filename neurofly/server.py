@@ -124,6 +124,16 @@ class Simulation(threading.Thread):
         self.window_steps = brain.p.steps(window_ms)
         self.channels = build_channels(brain, atlas)
         self._counts = np.zeros(brain.n, dtype=np.int64)
+        # attract mode: when nobody touches the screen, cycle through scenarios
+        self.presets: list[dict] = []
+        self.attract_enabled = True
+        self.idle_s = 45.0
+        self.attract_step_s = 12.0
+        self.attract_sequence = ["sugar", "p9", "MDN"]
+        self.last_activity = time.time()
+        self._attract_i = -1
+        self._attract_since = 0.0
+        self.attract_current: dict | None = None
 
     def run(self) -> None:
         b = self.brain
@@ -157,8 +167,10 @@ class Simulation(threading.Thread):
                             spk.append(s)
                     idx = np.concatenate(spk).astype(np.uint32) if spk else np.empty(0, np.uint32)
                 t_ms = b.t_ms
+                self._attract_tick()
                 if self.traces is not None:
-                    self.traces.after_window(idx, self.window_ms)
+                    # the demonstration should not carve traces into the day
+                    self.traces.after_window(idx, self.window_ms, learn=self.attract_current is None)
                     self.traces.save()
             wall = time.perf_counter() - t0
             ema_wall = wall if ema_wall is None else 0.9 * ema_wall + 0.1 * wall
@@ -184,6 +196,33 @@ class Simulation(threading.Thread):
             budget = (self.window_ms / 1000) / self.speed
             if wall < budget:
                 time.sleep(budget - wall)
+
+    def _attract_tick(self) -> None:
+        """Called every window from the simulation thread (lock held)."""
+        if not self.attract_enabled or not self.presets:
+            return
+        now = time.time()
+        if now - self.last_activity < self.idle_s:
+            return
+        if self.attract_current is None or now - self._attract_since > self.attract_step_s:
+            b = self.brain
+            if self.attract_current is not None:
+                b.deactivate(self.attract_current["idx"])
+            seq = [p for p in self.presets if p["key"] in self.attract_sequence and p["rate"] > 0]
+            if not seq:
+                return
+            self._attract_i = (self._attract_i + 1) % len(seq)
+            self.attract_current = seq[self._attract_i]
+            b.activate(self.attract_current["idx"], self.attract_current["rate"])
+            self._attract_since = now
+
+    def visitor_activity(self) -> None:
+        """A person did something: stop the demonstration and note the time."""
+        self.last_activity = time.time()
+        if self.attract_current is not None:
+            self.brain.deactivate(self.attract_current["idx"])
+            self.attract_current = None
+            self._attract_since = 0.0
 
     def _drain_commands(self) -> None:
         while True:
@@ -219,6 +258,10 @@ class Simulation(threading.Thread):
         c = cmd.get("cmd")
         tr = self.traces
         with self.lock:
+            if c not in ("info", "type", "speed", "pause", "play"):
+                self.visitor_activity()
+            if c == "touch":
+                return {"type": "ack", "cmd": c}
             if c == "activate":
                 idx = self._expand(cmd.get("idx", []), cmd.get("expand"))
                 rate = float(cmd.get("rate", 100))
@@ -360,6 +403,7 @@ class Simulation(threading.Thread):
                 "extra": [[int(pre), int(p), float(w)] for pre, (posts, ws) in b.extra.items() for p, w in zip(posts, ws)][:5000],
                 "n_extra": b.n_extra(),
                 "channels": self.channel_rates(),
+                "attract": self.attract_current["label"] if self.attract_current else None,
                 "awake": int(b.n_awake) if b.fast else -1,
                 "fast": bool(b.fast),
                 "traces": self.traces.summary() if self.traces else None,
@@ -383,6 +427,7 @@ class GalleryServer:
         self.sim = Simulation(brain, atlas, window_ms, traces)
         self.clients: set = set()
         self.presets = build_presets(brain, atlas)
+        self.sim.presets = self.presets
         self._neurons_bin = None
         self._meta = None
         self._mesh_cache: dict[str, bytes] = {}
@@ -607,7 +652,8 @@ class GalleryServer:
 
 def main(host: str = "0.0.0.0", port: int = 8765, window_ms: float = 10.0, seed: int | None = None,
          data_dir=None, release=None, prefetch_meshes: bool = True, fresh: bool = False,
-         synapse_points: bool = True, trace_params: TraceParams | None = None, eps: float | None = None) -> None:
+         synapse_points: bool = True, trace_params: TraceParams | None = None, eps: float | None = None,
+         idle_s: float = 45.0, attract_step_s: float = 12.0, attract: bool = True) -> None:
     from .model import Params
     params = Params(eps=eps) if eps is not None else None
     brain = load_brain(data_dir, seed=seed, release=release, params=params)
@@ -630,6 +676,9 @@ def main(host: str = "0.0.0.0", port: int = 8765, window_ms: float = 10.0, seed:
     print(f"traces: {traces.summary()['actions']} actions in the journal, "
           f"{traces.summary()['traced_neurons']} traced neurons, {brain.n_extra()} hand-made synapses", file=sys.stderr)
     server = GalleryServer(brain, atlas, window_ms, traces, syn)
+    server.sim.attract_enabled = attract
+    server.sim.idle_s = idle_s
+    server.sim.attract_step_s = attract_step_s
     try:
         asyncio.run(server.serve(host, port))
     finally:

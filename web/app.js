@@ -142,7 +142,10 @@ function pick(clientX, clientY) {
   return best;
 }
 
-let downAt = null;
+let downAt = null, lastTouch = 0;
+function touch() { const now = performance.now(); if (now - lastTouch > 2000) { lastTouch = now; send({ cmd: 'touch' }); } }
+addEventListener('pointerdown', touch, { passive: true });
+addEventListener('wheel', touch, { passive: true });
 renderer.domElement.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
 renderer.domElement.addEventListener('pointerup', (e) => {
   if (!downAt) return;
@@ -330,6 +333,8 @@ function onStatus(s) {
   $('#rate').textContent = Math.round(s.spikes_per_s); $('#active').textContent = s.active;
   $('#speed').textContent = s.paused ? 'пауза' : `${s.realtime.toFixed(2)}× реального` + (s.speed < 0.999 ? ` (задано 1/${Math.round(1 / s.speed)})` : '') + (s.awake >= 0 ? ` · не спят ${s.awake}` : '');
   $('#pause').textContent = s.paused ? 'Пуск' : 'Пауза';
+  if (s.attract) setStatus(`демонстрация: ${s.attract.toLowerCase()} · коснитесь экрана, чтобы управлять самим`);
+  else if ($('#status').textContent.startsWith('демонстрация')) setStatus('');
   $('#pause').classList.toggle('on', !!s.paused);
   for (const b of document.querySelectorAll('#presets button')) {
     const p = state.meta.presets[+b.dataset.k];

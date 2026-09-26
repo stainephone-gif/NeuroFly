@@ -4,10 +4,9 @@
 
 ```json
 "videos": {
-  "Шаурма":  "shawarma.mp4",
-  "Шахматы": "chess.mp4",
-  "Doom":    "doom.mp4",
-  "Диджей":  "dj.mp4"
+  "Шаурма":       "shawarma.mp4",
+  "Кубик Рубика": "rubik.mp4",
+  "Диджей":       "dj.mp4"
 }
 ```
 
