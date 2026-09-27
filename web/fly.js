@@ -15,13 +15,30 @@ export const BODY_RULES = {
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const TAU = Math.PI * 2;
 
+// Look: a metallic green blow fly seen from above (as in the reference photo).
 // leg geometry in body units (head points +x). coxa: attachment on the thorax;
 // rest: resting foot position; swing: how far the foot travels during a stride
 const LEGS = [
-  { coxa: [7, 4],  rest: [22, 17],  swing: 7 },   // front
-  { coxa: [2, 5],  rest: [4, 23],   swing: 8 },   // middle
-  { coxa: [-4, 5], rest: [-18, 20], swing: 7 },   // hind
+  { coxa: [8, 4],   rest: [27, 19],  swing: 7 },   // front
+  { coxa: [3, 6],   rest: [4, 27],   swing: 8 },   // middle
+  { coxa: [-2, 6],  rest: [-22, 24], swing: 7 },   // hind
 ];
+
+// deterministic pseudo-random numbers so the bristles do not flicker
+function rng(seed) { let x = seed >>> 0; return () => ((x = (x * 1664525 + 1013904223) >>> 0) / 4294967296); }
+function bristles(seed, n, cx, cy, rx, ry, len) {
+  const r = rng(seed), out = [];
+  for (let k = 0; k < n; k++) {
+    const a = r() * Math.PI * 2, d = Math.sqrt(r());
+    const x = cx + Math.cos(a) * rx * d, y = cy + Math.sin(a) * ry * d;
+    const dir = Math.atan2(y - cy, x - cx) + (r() - 0.5) * 0.8 + Math.PI * 0.85;   // lie backwards
+    out.push([x, y, dir, len * (0.6 + r() * 0.8)]);
+  }
+  return out;
+}
+const THORAX_BRISTLES = bristles(7, 34, 4, 0, 8.5, 9, 1.5);
+const ABDOMEN_BRISTLES = bristles(11, 50, -14, 0, 11.5, 10, 1.3);
+const HEAD_BRISTLES = bristles(3, 16, 15, 0, 3, 7, 1.6);
 
 export class FlyArena {
   constructor(canvas) {
@@ -101,16 +118,17 @@ export class FlyArena {
       for (const [x, y] of this.trail) ctx.lineTo(x, y);
       ctx.strokeStyle = 'rgba(255,209,102,.35)'; ctx.lineWidth = 1.5; ctx.stroke();
     }
-    const S = 2.0 * (1 + s.lift * 0.35);
+    const S = 2.6 * (1 + s.lift * 0.35);
     // shadow on the floor
-    ctx.save(); ctx.translate(this.x + s.lift * 12, this.y + s.lift * 18); ctx.rotate(this.heading); ctx.scale(2.0, 2.0);
-    ctx.beginPath(); ctx.ellipse(-2, 0, 22, 11, 0, 0, TAU); ctx.fillStyle = `rgba(0,0,0,${0.4 - s.lift * 0.25})`; ctx.filter = 'blur(2px)'; ctx.fill(); ctx.filter = 'none'; ctx.restore();
+    ctx.save(); ctx.translate(this.x + s.lift * 12, this.y + s.lift * 18); ctx.rotate(this.heading); ctx.scale(2.6, 2.6);
+    ctx.beginPath(); ctx.ellipse(-6, 0, 26, 16, 0, 0, TAU); ctx.fillStyle = `rgba(0,0,0,${0.4 - s.lift * 0.25})`; ctx.filter = 'blur(2px)'; ctx.fill(); ctx.filter = 'none'; ctx.restore();
 
     ctx.save(); ctx.translate(this.x, this.y - s.lift * 22); ctx.rotate(this.heading); ctx.scale(S, S);
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     this.drawLegs(ctx, s);
-    this.drawWings(ctx, s);
     this.drawBody(ctx, s);
+    this.drawWings(ctx, s);
+    this.drawFront(ctx, s);
     ctx.restore();
     ctx.restore();
   }
@@ -122,14 +140,13 @@ export class FlyArena {
     const dir = s.v >= 0 ? 1 : -1;
     let dx = 0, dy = 0, up = 0;
     if (s.moving) {
-      const c = Math.cos(ph);              // stance: foot slides back; swing: foot flies forward
-      dx = -dir * c * L.swing;
-      up = Math.max(0, Math.sin(ph)) * 3;  // lifted during swing
-      if (Math.sin(ph) > 0) dx = dir * Math.cos(ph) * L.swing;
+      const sw = Math.sin(ph) > 0;           // swing phase: foot flies forward; stance: slides back
+      dx = (sw ? dir : -dir) * Math.cos(ph) * L.swing;
+      up = Math.max(0, Math.sin(ph)) * 3;
     } else if (s.taste > 0.2 && i === 0) {
       dx = Math.sin(this.t * 22) * 2.5 * s.taste; up = Math.abs(Math.sin(this.t * 22)) * 2 * s.taste;
     } else if (this.groom && i === 0) {
-      dx = -6 + Math.sin(this.t * 9) * 3; dy = -6 * side; up = 2;
+      dx = -7 + Math.sin(this.t * 9) * 3; dy = -8 * side; up = 2;
     }
     return [L.rest[0] + dx, side * L.rest[1] + dy, up];
   }
@@ -139,17 +156,29 @@ export class FlyArena {
       const L = LEGS[i];
       const [cx, cy] = [L.coxa[0], L.coxa[1] * side];
       const [fx, fy, up] = this.legFoot(i, side, s);
-      // femur goes outward and up (towards the viewer), tibia comes back down to the foot
-      const kx = cx + (fx - cx) * 0.45 - (i === 2 ? 2 : i === 0 ? -2 : 0);
-      const ky = cy + (fy - cy) * 0.62 + side * 2;
-      const shade = 'rgba(70,45,25,.95)', hi = 'rgba(160,120,70,.9)';
-      ctx.strokeStyle = shade; ctx.lineWidth = 2.4;
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(kx, ky); ctx.stroke();           // femur
-      ctx.lineWidth = 1.8;
-      ctx.beginPath(); ctx.moveTo(kx, ky); ctx.lineTo(fx, fy - up * 0.3); ctx.stroke(); // tibia
-      ctx.strokeStyle = hi; ctx.lineWidth = 1.1;
-      ctx.beginPath(); ctx.moveTo(fx, fy - up * 0.3); ctx.lineTo(fx + 3, fy + side * 1.5); ctx.stroke(); // tarsus
-      ctx.fillStyle = shade; ctx.beginPath(); ctx.arc(kx, ky, 1.3, 0, TAU); ctx.fill();  // knee
+      const kx = cx + (fx - cx) * 0.42 + (i === 0 ? 2 : i === 2 ? -2 : 0);
+      const ky = cy + (fy - cy) * 0.6 + side * 3;
+      const tx = fx - up * 0.2, ty = fy;
+      for (const [col, extra] of [['rgba(150,150,145,.55)', 0.9], ['#141414', 0]]) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1.9 + extra; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(kx, ky); ctx.stroke();   // femur
+        ctx.lineWidth = 1.3 + extra; ctx.beginPath(); ctx.moveTo(kx, ky); ctx.lineTo(tx, ty); ctx.stroke();   // tibia
+      }
+      ctx.strokeStyle = '#141414';
+      // tarsus: five little segments bending forward, ending in claws
+      const ux = (tx - kx), uy = (ty - ky), ul = Math.hypot(ux, uy) || 1;
+      const ex = tx + (ux / ul) * 6, ey = ty + (uy / ul) * 6;
+      ctx.strokeStyle = 'rgba(150,150,145,.7)'; ctx.lineWidth = 1.0; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.lineWidth = 0.5; ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex + 1.2, ey + 0.9 * side); ctx.moveTo(ex, ey); ctx.lineTo(ex + 1.2, ey - 0.6 * side); ctx.stroke();
+      // bristles along femur and tibia
+      ctx.strokeStyle = 'rgba(170,170,165,.6)'; ctx.lineWidth = 0.3;
+      for (const [ax, ay, bx, by, n] of [[cx, cy, kx, ky, 5], [kx, ky, tx, ty, 7]]) {
+        const lx = bx - ax, ly = by - ay, ll = Math.hypot(lx, ly) || 1, nx = -ly / ll, ny = lx / ll;
+        for (let k = 1; k <= n; k++) {
+          const u = k / (n + 1), px = ax + lx * u, py = ay + ly * u, sgn = k % 2 ? 1 : -1;
+          ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + nx * 1.4 * sgn + (lx / ll) * 0.8, py + ny * 1.4 * sgn + (ly / ll) * 0.8); ctx.stroke();
+        }
+      }
     }
   }
 
@@ -157,86 +186,101 @@ export class FlyArena {
     const buzz = this.wingBuzz;
     for (const side of [-1, 1]) {
       ctx.save();
-      ctx.translate(-2, side * 4);
-      // folded flat over the abdomen when at rest, spread and blurred when jumping
-      const angle = side * (0.12 + buzz * (0.9 + Math.sin(this.t * 90) * 0.35));
-      ctx.rotate(angle);
-      const g = ctx.createLinearGradient(0, 0, -30, 0);
-      g.addColorStop(0, 'rgba(210,225,245,.55)'); g.addColorStop(1, 'rgba(210,225,245,.18)');
-      ctx.fillStyle = g;
+      ctx.translate(1, side * 5.5);
+      // spread in a V at rest, sweeping out and blurring when the fly jumps
+      const spread = 0.42 + buzz * (0.7 + Math.sin(this.t * 90) * 0.35);
+      ctx.rotate(-side * spread);
+      const L = 40, W = 13;
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      ctx.bezierCurveTo(-8, side * -6, -26, side * -7, -32, side * -1);
-      ctx.bezierCurveTo(-30, side * 4, -12, side * 5, 0, side * 1.5);
-      ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = 'rgba(120,130,150,.6)'; ctx.lineWidth = 0.5; ctx.stroke();
-      // veins
-      ctx.strokeStyle = 'rgba(90,100,120,.55)'; ctx.lineWidth = 0.45;
-      for (const k of [-1.5, -4, -6]) { ctx.beginPath(); ctx.moveTo(-2, side * k * 0.4); ctx.quadraticCurveTo(-16, side * k, -31, side * (k * 0.35 - 0.5)); ctx.stroke(); }
-      ctx.beginPath(); ctx.moveTo(-14, side * -5.5); ctx.lineTo(-13, side * 2.5); ctx.stroke();
+      ctx.bezierCurveTo(-10, side * 3.5, -28, side * 6, -L, side * 2.5);           // leading (outer) edge
+      ctx.bezierCurveTo(-L - 2, -side * 3, -30, -side * W * 0.62, -14, -side * W * 0.5); // tip and trailing edge
+      ctx.bezierCurveTo(-7, -side * 4.5, -2, -side * 2, 0, 0);
+      ctx.closePath();
+      const g = ctx.createLinearGradient(0, 0, -L, 0);
+      g.addColorStop(0, 'rgba(130,105,80,.5)'); g.addColorStop(0.25, 'rgba(215,220,225,.3)'); g.addColorStop(1, 'rgba(235,240,245,.2)');
+      ctx.fillStyle = g; ctx.fill();
+      // faint rainbow sheen of the membrane
+      const sh = ctx.createLinearGradient(0, side * 6, -L, -side * 6);
+      sh.addColorStop(0.3, 'rgba(120,200,255,0)'); sh.addColorStop(0.55, 'rgba(160,120,255,.08)'); sh.addColorStop(0.75, 'rgba(120,255,190,.07)'); sh.addColorStop(1, 'rgba(255,200,120,0)');
+      ctx.fillStyle = sh; ctx.fill();
+      ctx.strokeStyle = 'rgba(200,190,175,.45)'; ctx.lineWidth = 0.4; ctx.stroke();
+      // venation: costa, radial and medial veins, two crossveins
+      ctx.strokeStyle = 'rgba(150,115,80,.85)';
+      ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(0, 0); ctx.bezierCurveTo(-10, side * 3.4, -26, side * 5.6, -36, side * 3.6); ctx.stroke();
+      ctx.lineWidth = 0.45;
+      for (const [y0, y1, y2, x2] of [[0.6, 3.2, 2.6, -37], [0.2, 1.4, -0.4, -39], [-0.6, -1.8, -4.5, -36], [-1.2, -4.2, -6.5, -26]]) {
+        ctx.beginPath(); ctx.moveTo(-2, side * y0); ctx.quadraticCurveTo(-18, side * y1, x2, side * y2); ctx.stroke();
+      }
+      ctx.beginPath(); ctx.moveTo(-17, side * 1.6); ctx.lineTo(-18, side * -1.6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-25, side * -2.7); ctx.lineTo(-23.5, side * -5.6); ctx.stroke();
       ctx.restore();
     }
-    // halteres
+    // calypters: pale scales covering the halteres at the wing bases
     for (const side of [-1, 1]) {
-      ctx.strokeStyle = 'rgba(200,170,90,.8)'; ctx.lineWidth = 0.8;
-      ctx.beginPath(); ctx.moveTo(-4, side * 5); ctx.lineTo(-7, side * 8.5); ctx.stroke();
-      ctx.fillStyle = 'rgba(230,200,110,.9)'; ctx.beginPath(); ctx.arc(-7, side * 8.5, 1.2, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(232,226,210,.85)';
+      ctx.beginPath(); ctx.ellipse(-3.5, side * 6.2, 2.6, 1.8, side * 0.4, 0, Math.PI * 2); ctx.fill();
     }
   }
 
+  drawBristles(ctx, list, color, width) {
+    ctx.strokeStyle = color; ctx.lineWidth = width;
+    ctx.beginPath();
+    for (const [x, y, a, l] of list) { ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); }
+    ctx.stroke();
+  }
+
+  metallic(ctx, cx, cy, r, stops) {
+    const g = ctx.createRadialGradient(cx, cy, 0.5, cx + r * 0.25, cy + r * 0.3, r);
+    stops.forEach(([o, c]) => g.addColorStop(o, c));
+    return g;
+  }
+
   drawBody(ctx, s) {
-    // abdomen: tan with black bands, widest in the middle
-    let g = ctx.createRadialGradient(-10, -3, 1, -11, 0, 15);
-    g.addColorStop(0, '#d9b37a'); g.addColorStop(0.7, '#a97d45'); g.addColorStop(1, '#5a3d20');
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.moveTo(-3, -7);
-    ctx.bezierCurveTo(-12, -9, -24, -6, -27, 0);
-    ctx.bezierCurveTo(-24, 6, -12, 9, -3, 7);
-    ctx.closePath(); ctx.fill();
-    ctx.save(); ctx.clip();
-    ctx.fillStyle = 'rgba(25,15,8,.85)';
-    for (const bx of [-8, -13, -18, -22.5]) { ctx.beginPath(); ctx.ellipse(bx, 0, 1.4, 9, 0, 0, TAU); ctx.fill(); }
-    ctx.restore();
-    // thorax: rounded, lighter, with a dorsal seam and bristle hints
-    g = ctx.createRadialGradient(3, -3, 1, 2, 0, 10);
-    g.addColorStop(0, '#e2c28c'); g.addColorStop(0.6, '#b5884f'); g.addColorStop(1, '#6b4a26');
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.ellipse(2, 0, 9.5, 7.8, 0, 0, TAU); ctx.fill();
-    ctx.strokeStyle = 'rgba(60,40,20,.5)'; ctx.lineWidth = 0.6;
-    ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-5, 0); ctx.stroke();
-    ctx.strokeStyle = 'rgba(40,25,10,.6)'; ctx.lineWidth = 0.5;
-    for (let k = 0; k < 8; k++) { const a = -1.1 + k * 0.31, r = 7.4; ctx.beginPath(); ctx.moveTo(2 + Math.cos(a) * r, Math.sin(a) * r); ctx.lineTo(2 + Math.cos(a) * (r + 2.2), Math.sin(a) * (r + 2.2)); ctx.stroke(); }
-    // neck + head
-    ctx.fillStyle = '#7a5630'; ctx.beginPath(); ctx.ellipse(11, 0, 2.5, 3.5, 0, 0, TAU); ctx.fill();
-    g = ctx.createRadialGradient(14, -1.5, 1, 14, 0, 7);
-    g.addColorStop(0, '#d8b57e'); g.addColorStop(1, '#6b4a26');
-    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(14, 0, 5.5, 6.2, 0, 0, TAU); ctx.fill();
-    // compound eyes: big, red, with a facet sheen
+    // abdomen: rounded, metallic green shading into blue at the rim
+    ctx.fillStyle = this.metallic(ctx, -11, -4, 14, [[0, '#b8f0c0'], [0.18, '#5cc98a'], [0.5, '#1f8a6e'], [0.8, '#135a66'], [1, '#0a2a3a']]);
+    ctx.beginPath(); ctx.ellipse(-14, 0, 12.5, 10.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(8,30,35,.6)'; ctx.lineWidth = 0.5;
+    for (const bx of [-9, -15, -20.5]) { ctx.beginPath(); ctx.ellipse(bx, 0, 1.2, 9.6 - Math.abs(bx + 14) * 0.25, 0, -1.2, 1.2); ctx.stroke(); }
+    this.drawBristles(ctx, ABDOMEN_BRISTLES, 'rgba(10,15,15,.7)', 0.25);
+  }
+
+  drawFront(ctx, s) {
+    // scutellum: small rounded plate behind the thorax
+    ctx.fillStyle = this.metallic(ctx, -3, -2, 6, [[0, '#d8f08a'], [0.4, '#5fb85a'], [1, '#1d5a45']]);
+    ctx.beginPath(); ctx.ellipse(-3.2, 0, 3.6, 5.2, 0, 0, Math.PI * 2); ctx.fill();
+    // thorax: gold-green metallic with three faint dark stripes
+    ctx.fillStyle = this.metallic(ctx, 6, -4, 11, [[0, '#f4f8b0'], [0.2, '#c9e05a'], [0.45, '#6fbb4a'], [0.75, '#2a8a5a'], [1, '#12423a']]);
+    ctx.beginPath(); ctx.ellipse(4.5, 0, 9, 9.3, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(10,40,25,.28)'; ctx.lineWidth = 1.1;
+    for (const y of [-3.6, 0, 3.6]) { ctx.beginPath(); ctx.moveTo(11, y * 0.7); ctx.quadraticCurveTo(4, y, -3, y * 0.8); ctx.stroke(); }
+    this.drawBristles(ctx, THORAX_BRISTLES, 'rgba(8,10,8,.75)', 0.28);
+    // head: wide, almost all eyes
+    ctx.fillStyle = '#2b2622';
+    ctx.beginPath(); ctx.ellipse(15, 0, 4.2, 8.4, 0, 0, Math.PI * 2); ctx.fill();
     for (const side of [-1, 1]) {
-      g = ctx.createRadialGradient(15, side * 3.8, 0.5, 15, side * 4.2, 3.6);
-      g.addColorStop(0, '#ff8a7a'); g.addColorStop(0.5, '#d9302a'); g.addColorStop(1, '#6e0f10');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(15, side * 4.2, 3.2, 3.9, side * 0.3, 0, TAU); ctx.fill();
-      ctx.fillStyle = 'rgba(0,0,0,.18)';
-      for (let u = -2; u <= 2; u++) for (let q = -2; q <= 2; q++) { if (u * u + q * q > 5) continue; ctx.beginPath(); ctx.arc(15 + u * 1.1, side * 4.2 + q * 1.2, 0.35, 0, TAU); ctx.fill(); }
+      const g = ctx.createRadialGradient(16, side * 3, 0.4, 15.5, side * 4.4, 5);
+      g.addColorStop(0, '#d0786a'); g.addColorStop(0.35, '#8e3a30'); g.addColorStop(0.8, '#521c18'); g.addColorStop(1, '#2a0d0b');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(15.3, side * 4.5, 4.4, 4.2, side * 0.25, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.beginPath(); ctx.ellipse(16.2, side * 3.4, 1.3, 0.8, side * 0.4, 0, Math.PI * 2); ctx.fill();
     }
-    // ocelli
-    ctx.fillStyle = '#c93a2c'; for (const [ox, oy] of [[12.5, 0], [13.3, -1.2], [13.3, 1.2]]) { ctx.beginPath(); ctx.arc(ox, oy, 0.45, 0, TAU); ctx.fill(); }
-    // antennae with aristae
+    // frons: pale silvery stripe between the eyes, dark centre
+    ctx.fillStyle = '#cfc7b3'; ctx.beginPath(); ctx.ellipse(15, 0, 3.6, 1.1, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#3b2c24'; ctx.beginPath(); ctx.ellipse(15, 0, 3.2, 0.5, 0, 0, Math.PI * 2); ctx.fill();
+    this.drawBristles(ctx, HEAD_BRISTLES, 'rgba(10,10,10,.85)', 0.35);
+    // antennae: short, dark, with feathery aristae
     for (const side of [-1, 1]) {
-      const wig = Math.sin(this.t * 6 + side) * s.taste * 1.5;
-      ctx.strokeStyle = '#4a3218'; ctx.lineWidth = 1.2;
-      ctx.beginPath(); ctx.moveTo(18.5, side * 1.6); ctx.lineTo(21, side * (2.8 + wig)); ctx.stroke();
-      ctx.lineWidth = 0.5;
-      ctx.beginPath(); ctx.moveTo(21, side * (2.8 + wig)); ctx.lineTo(24.5, side * (4.5 + wig)); ctx.stroke();
+      const wig = Math.sin(this.t * 6 + side) * s.taste * 1.2;
+      ctx.strokeStyle = '#1a1512'; ctx.lineWidth = 1.1;
+      ctx.beginPath(); ctx.moveTo(18.6, side * 0.9); ctx.lineTo(20.6, side * (1.8 + wig)); ctx.stroke();
+      ctx.lineWidth = 0.4; ctx.beginPath(); ctx.moveTo(20.6, side * (1.8 + wig)); ctx.lineTo(23.6, side * (3.2 + wig)); ctx.stroke();
     }
-    // proboscis: extends from under the head, ends in the labellum
+    // proboscis with its sponge-like tip
     if (s.prob > 0.03) {
-      const len = 3 + 11 * s.prob;
-      ctx.strokeStyle = '#8a6437'; ctx.lineWidth = 2.2;
-      ctx.beginPath(); ctx.moveTo(18, 0); ctx.lineTo(18 + len, 0); ctx.stroke();
-      ctx.fillStyle = '#b98a55'; ctx.beginPath(); ctx.ellipse(18 + len + 0.5, 0, 1.6, 2.4, 0, 0, TAU); ctx.fill();
-      ctx.strokeStyle = 'rgba(60,40,20,.7)'; ctx.lineWidth = 0.5;
-      ctx.beginPath(); ctx.moveTo(18 + len, -2); ctx.lineTo(18 + len, 2); ctx.stroke();
+      const len = 3 + 10 * s.prob;
+      ctx.strokeStyle = '#2a211c'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(18.5, 0); ctx.lineTo(18.5 + len, 0); ctx.stroke();
+      ctx.fillStyle = '#4a3a2e'; ctx.beginPath(); ctx.ellipse(19 + len, 0, 1.6, 2.4, 0, 0, Math.PI * 2); ctx.fill();
     }
   }
 }
