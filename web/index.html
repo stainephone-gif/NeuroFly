@@ -49,6 +49,8 @@
   .big-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   button.big { font-size:18px; font-weight:600; padding:14px 12px; border-radius:10px; }
   button.wide { width:100%; }
+  button.reset { background:var(--red); border-color:var(--red); color:#fff; }
+  button.reset:hover { background:#ff7373; }
   button.accent.on { color:#1a1300; }
   #stage { position:relative; height:340px; }
   #arena canvas { display:block; width:100%; height:340px; }
@@ -137,7 +139,7 @@
     </details>
   </div>
   <div class="panel">
-    <button id="clear" class="big wide" title="снять все стимулы и связи, вернуть муху">Сброс</button>
+    <button id="clear" class="big wide reset" title="снять все стимулы и связи, вернуть муху">Сброс</button>
   </div>
 </div>
 
