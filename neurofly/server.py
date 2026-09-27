@@ -129,7 +129,7 @@ class Simulation(threading.Thread):
         self.attract_enabled = True
         self.idle_s = 45.0
         self.attract_step_s = 12.0
-        self.attract_sequence = ["sugar", "p9", "MDN"]
+        self.attract_sequence: list[str] | None = None   # None: every scenario button, in screen order
         self.last_activity = time.time()
         self._attract_i = -1
         self._attract_since = 0.0
@@ -208,7 +208,8 @@ class Simulation(threading.Thread):
             b = self.brain
             if self.attract_current is not None:
                 b.deactivate(self.attract_current["idx"])
-            seq = [p for p in self.presets if p["key"] in self.attract_sequence and p["rate"] > 0]
+            keys = self.attract_sequence
+            seq = [p for p in self.presets if p["rate"] > 0 and (keys is None or p["key"] in keys)]
             if not seq:
                 return
             self._attract_i = (self._attract_i + 1) % len(seq)
