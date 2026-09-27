@@ -157,20 +157,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   onNeuronClick(i);
 });
 
-function onNeuronClick(i) {
-  const rate = +$('#rate-slider').value, w = +$('#w-slider').value, sign = $('#sign').classList.contains('on') ? 1 : -1;
-  if (state.mode === 'activate') {
-    send({ cmd: state.status && stimOf(i) ? 'deactivate' : 'activate', idx: [i], rate, expand: state.scope });
-  } else if (state.mode === 'silence') {
-    send({ cmd: state.status && state.silSet.has(i) ? 'unsilence' : 'silence', idx: [i], expand: state.scope });
-  } else if (state.mode === 'connect') {
-    if (state.pendingPre === null) { state.pendingPre = i; setStatus('источник выбран, теперь щёлкните по цели'); select(i); return; }
-    send({ cmd: 'connect', pre: state.pendingPre, post: i, n: w, sign, expand: state.linkGroups ? state.scope : null });
-    setStatus(state.linkGroups ? `связь тип → тип: ${sign > 0 ? '+' : '−'}${w} синапсов на пару` : `связь ${state.pendingPre} → ${i}: ${sign > 0 ? '+' : '−'}${w} синапсов`);
-    state.pendingPre = null;
-  }
-  select(i);
-}
+function onNeuronClick(i) { select(i); }
 
 function select(i) {
   state.selected = i;
@@ -381,7 +368,7 @@ function setStage() {
   $('#arena-action').textContent = meme ? 'так это выглядит в ролике' : arena.action;
   $('#arena-note').textContent = meme
     ? 'Ролик из интернета. Подпись берётся из словаря мема: это всё, что связывает видео с мозгом.'
-    : 'Телом управляют только каналы мозга: DNp09 вперёд, MDN назад, DNa02 повороты, MN9 хоботок, DNp01 прыжок. Проведите новую связь, и походка изменится.';
+    : 'Телом управляют только каналы мозга: DNp09 вперёд, MDN назад, DNa02 повороты, MN9 хоботок, DNp01 прыжок. В экскурсии видно, как одна новая связь меняет походку.';
   if (!meme) { const v = $('#meme-video'); v.pause(); v.removeAttribute('src'); v.load(); stage.clip = null; $('#meme-missing').style.display = 'none'; }
 }
 function updateStage(best, action) {
@@ -448,8 +435,8 @@ const tour = {
         setLines(synLines, new Float32Array(0), new Float32Array(0));
         setLines(skeletonLines, new Float32Array(0), new Float32Array(0));
         setSynPoints(new Float32Array(0), new Float32Array(0));
-      } else if (name === 'memes') { $('#memes').open = !!x; }
-      else if (name === 'vocab') { const b = document.querySelector(`#tr-vocab button[data-v="${x}"]`); if (b) b.click(); }
+      } else if (name === 'memes') { setMemes(!!x); }
+      else if (name === 'vocab') { if (x === FLY_TAB) setMemes(false); else { if ($('#memes').style.display === 'none') setMemes(true); setVocab(x); } }
       else if (name === 'json') { $('#tr-json').style.display = x ? 'block' : 'none'; }
     }
   },
@@ -499,15 +486,28 @@ $('#tour-close').onclick = () => tour.stop();
 $('#tour-next').onclick = () => tour.next();
 $('#tour-action').onclick = () => tour.act();
 
+function setMemes(open) {
+  $('#memes').style.display = open ? 'block' : 'none';
+  $('#memes-toggle').classList.toggle('on', open);
+  if (!open) { if (tr.vocabName !== FLY_TAB) setVocab(FLY_TAB); $('#tr-json').style.display = 'none'; }
+  else if (tr.vocabName === FLY_TAB && tr.vocab) setVocab(Object.keys(tr.vocab.idle)[0]);
+}
+$('#memes-toggle').onclick = () => setMemes($('#memes').style.display === 'none');
+
 // ------------------------------------------------------- translation
 const tr = { open: false, vocab: null, vocabName: 'Муха' };
 const FLY_TAB = 'Муха';
+function setVocab(name) {
+  tr.vocabName = name;
+  for (const o of document.querySelectorAll('#tr-vocab button')) o.classList.toggle('on', o.dataset.v === name);
+  setStage(); renderTranslation();
+}
 async function loadVocab() {
   try { tr.vocab = await (await fetch('/vocab.json')).json(); } catch (e) { tr.vocab = null; }
   if (!tr.vocab) return;
-  const names = [FLY_TAB, ...Object.keys(tr.vocab.idle)];
+  const names = Object.keys(tr.vocab.idle);   // meme tabs only; the fly is shown when the menu is closed
   $('#tr-vocab').innerHTML = names.map((n) => `<button data-v="${n}" class="${n === tr.vocabName ? 'on' : ''}">${n}</button>`).join('');
-  for (const b of document.querySelectorAll('#tr-vocab button')) b.onclick = () => { tr.vocabName = b.dataset.v; for (const o of document.querySelectorAll('#tr-vocab button')) o.classList.toggle('on', o === b); setStage(); renderTranslation(); };
+  for (const b of document.querySelectorAll('#tr-vocab button')) b.onclick = () => setVocab(b.dataset.v);
   $('#tr-json').textContent = JSON.stringify(Object.fromEntries(Object.entries(tr.vocab.words).map(([k, v]) => [k, v[tr.vocabName]])), null, 1);
 }
 function renderTranslation() {
@@ -542,28 +542,21 @@ function setStatus(t) { $('#status').textContent = t; }
 tr.open = true;
 loadVocab().then(renderTranslation);
 $('#tr-edit').onclick = () => { const j = $('#tr-json'); j.style.display = j.style.display === 'none' ? 'block' : 'none'; };
-const MODE_HINTS = {
-  look: 'Щёлкните по любой точке, чтобы узнать, что это за нейрон. Сценарии ниже включают настоящие входы мозга.',
-  connect: 'Щёлкните по нейрону-источнику, потом по нейрону-цели: между ними появится связь, которой в мозге не было. Потом запустите сценарий и смотрите на муху.',
-};
-for (const b of document.querySelectorAll('button[data-mode]')) b.onclick = () => {
-  state.mode = b.dataset.mode; state.pendingPre = null;
-  for (const o of document.querySelectorAll('button[data-mode]')) o.classList.toggle('on', o === b);
-  $('#main-panel').dataset.mode = state.mode;
-  $('#mode-hint').textContent = MODE_HINTS[state.mode];
-};
-$('#rate-slider').oninput = (e) => $('#rate-out').textContent = e.target.value;
-$('#w-slider').oninput = (e) => $('#w-out').textContent = e.target.value;
-$('#link-scope').onclick = () => { state.linkGroups = !state.linkGroups; const b = $('#link-scope'); b.classList.toggle('on', state.linkGroups); b.textContent = state.linkGroups ? 'все клетки этих типов' : 'только эти два нейрона'; };
 // slider 0..100 -> slow-down factor 1..50 (log scale); the server paces to 1/factor of real time
 const slowFactor = (v) => Math.round(Math.pow(50, v / 100) * 10) / 10;
 $('#speed-slider').oninput = (e) => { const f = slowFactor(+e.target.value); $('#speed-out').textContent = f <= 1 ? '1×' : `1/${f}`; };
 $('#speed-slider').onchange = (e) => { const f = slowFactor(+e.target.value); send({ cmd: 'speed', value: 1 / f }); };
-$('#sign').onclick = () => { const b = $('#sign'); const on = !b.classList.contains('on'); b.classList.toggle('on', on); b.textContent = on ? '+ возбуждать цель' : '− тормозить цель'; };
 $('#pause').onclick = () => send({ cmd: state.status && state.status.paused ? 'play' : 'pause' });
-$('#reset').onclick = () => send({ cmd: 'reset' });
-$('#clear').onclick = () => { send({ cmd: 'clear' }); setLines(synLines, new Float32Array(0), new Float32Array(0)); setLines(skeletonLines, new Float32Array(0), new Float32Array(0)); setSynPoints(new Float32Array(0), new Float32Array(0)); };
-$('#toggle-scope').onclick = () => { state.scope = state.scope === 'type' ? 'type_side' : 'type'; $('#toggle-scope').textContent = state.scope === 'type' ? 'обе стороны' : 'одна сторона'; };
+$('#clear').onclick = () => {
+  if (tour.i >= 0) tour.stop();
+  send({ cmd: 'clear' });
+  setLines(synLines, new Float32Array(0), new Float32Array(0));
+  setLines(skeletonLines, new Float32Array(0), new Float32Array(0));
+  setSynPoints(new Float32Array(0), new Float32Array(0));
+  setMemes(false);
+  $('#info').style.display = 'none'; selectMarker.visible = false; state.selected = null;
+  frameCamera(); controls.autoRotate = true;
+};
 $('#info-close').onclick = () => { $('#info').style.display = 'none'; selectMarker.visible = false; };
 $('#info-synapses').onclick = () => showSynapses(state.info);
 $('#info-skeleton').onclick = () => showSkeleton(state.info.idx);

@@ -23,7 +23,7 @@ set EDGE=
 if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" set EDGE=%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe
 if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" set EDGE=%ProgramFiles%\Microsoft\Edge\Application\msedge.exe
 
-set FLAGS=--new-window --no-first-run --disable-session-crashed-bubble --disable-infobars --autoplay-policy=no-user-gesture-required
+set FLAGS=--new-window --no-first-run --disable-session-crashed-bubble --disable-infobars --autoplay-policy=no-user-gesture-required --ignore-gpu-blocklist
 if "%KIOSK%"=="1" set FLAGS=%FLAGS% --kiosk
 
 if defined CHROME (
