@@ -12,6 +12,9 @@ set KIOSK=1
 rem extra server options, e.g. --hold 30 --trace-alpha 0 --fresh
 set OPTIONS=
 rem -----------------------------------------------------------------------
+rem machine-specific overrides live in windows\local.bat (not tracked by git,
+rem so "git pull" never touches it); copy local.example.bat to local.bat to start
+if exist "%~dp0local.bat" call "%~dp0local.bat"
 
 rem numba keeps its compiled cache in a plain ASCII path (Cyrillic folders can break it)
 set NUMBA_CACHE_DIR=%TEMP%\neurofly_numba

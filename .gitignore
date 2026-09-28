@@ -18,3 +18,6 @@ venv/
 # meme videos live on the gallery machine, not in git
 web/memes/*
 !web/memes/README.md
+
+# per-machine launcher settings
+windows/local.bat
