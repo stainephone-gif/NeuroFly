@@ -12,7 +12,7 @@ rem ---- find a real Python 3.10-3.14 --------------------------------------
 rem "python" on a fresh Windows is often only a Microsoft Store stub that does nothing,
 rem so try the py launcher first and check that the interpreter actually runs.
 set PY=
-for %%V in (3.12 3.11 3.13 3.14 3.10) do (
+for %%V in (3.12 3.11 3.13 3.10 3.14) do (
   if not defined PY (
     py -%%V -c "import sys" >NUL 2>&1 && set "PY=py -%%V"
   )
@@ -69,6 +69,15 @@ echo Installing NeuroFly and dependencies (a few minutes)...
 ".venv\Scripts\python.exe" -m pip install --upgrade pip >NUL
 ".venv\Scripts\python.exe" -m pip install -e ".[gallery]"
 if errorlevel 1 (echo pip install failed, see the message above & pause & exit /b 1)
+
+".venv\Scripts\python.exe" -c "import numba" >NUL 2>&1
+if errorlevel 1 (
+  echo.
+  echo WARNING: the numba accelerator does not work with this Python, the model will run about 8x slower.
+  echo Install Python 3.12 from python.org, delete the .venv folder and run install.bat again.
+  ".venv\Scripts\python.exe" -c "import numba"
+  echo.
+)
 
 echo.
 echo Downloading the connectome (about 105 MB) and building the cache...

@@ -24,9 +24,11 @@ try:
     from numba import njit
     AVAILABLE = True
     ENGINE = f"numba {_numba.__version__}"
-except ImportError as _e:  # pragma: no cover
+except Exception as _e:  # pragma: no cover  (ImportError, or numba refusing this NumPy/Python)
     AVAILABLE = False
-    ENGINE = f"NumPy only, about 8x slower (numba not importable: {_e})"
+    import sys as _sys
+    ENGINE = (f"NumPy only, about 8x slower: numba does not work here "
+              f"(Python {_sys.version.split()[0]}: {type(_e).__name__}: {_e})")
 
     def njit(*a, **k):  # type: ignore
         def deco(f):

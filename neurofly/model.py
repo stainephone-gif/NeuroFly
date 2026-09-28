@@ -473,7 +473,8 @@ class FlyBrain:
     @property
     def engine(self) -> str:
         from . import fast as _fast
-        return (_fast.ENGINE if self.fast else "NumPy") + f", rest threshold {self.p.eps:g} mV"
+        name = _fast.ENGINE if (self.fast or not _fast.AVAILABLE) else "NumPy (numba switched off)"
+        return name + f", rest threshold {self.p.eps:g} mV"
 
     @property
     def n_awake(self) -> int:
