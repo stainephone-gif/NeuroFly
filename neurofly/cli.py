@@ -71,7 +71,9 @@ def cmd_run(args: argparse.Namespace) -> None:
     records = brain.run_trials(args.t, args.trials, progress=args.progress)
     wall = time.perf_counter() - t0
     bio = args.t * args.trials / 1000
-    print(f"simulated {bio:g} s in {wall:.1f} s wall ({wall / bio:.1f} x slower than real time)", file=sys.stderr)
+    ratio = bio / wall
+    verdict = "faster than real time" if ratio >= 1 else "slower than real time"
+    print(f"simulated {bio:g} s in {wall:.1f} s wall: speed {ratio:.2f}x real time ({verdict})", file=sys.stderr)
 
     table = SpikeRecord.mean_rates(records)
     n_spikes = sum(len(r) for r in records) / len(records)

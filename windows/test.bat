@@ -11,5 +11,5 @@ echo.
 echo === 2/2: fast (rest threshold 1.0 mV) ===
 ".venv\Scripts\python.exe" -m neurofly.cli run --activate sugar --rate 200 --trials 3 --eps 1.0
 echo.
-echo Look at "engine:" (must say numba) and "x slower than real time" in both runs.
+echo Look at "engine:" (must say numba) and "speed ...x real time" in both runs: 1.0 or more is real time.
 pause
