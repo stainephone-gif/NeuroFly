@@ -318,7 +318,7 @@ function onStatus(s) {
   renderTranslation();
   $('#n-stim').textContent = s.n_stim; $('#n-sil').textContent = s.n_silenced; $('#n-extra').textContent = s.n_extra;
   $('#rate').textContent = Math.round(s.spikes_per_s); $('#active').textContent = s.active;
-  $('#speed').textContent = s.paused ? 'пауза' : `${s.realtime.toFixed(2)}× реального` + (s.speed < 0.999 ? ` (задано 1/${Math.round(1 / s.speed)})` : '') + (s.awake >= 0 ? ` · не спят ${s.awake}` : '');
+  $('#speed').textContent = s.paused ? 'пауза' : `${s.realtime.toFixed(2)}× реального (счёт ${(s.compute || 0).toFixed(2)}×${s.engine && s.engine.startsWith('NumPy') ? ', без numba!' : ''})` + (s.speed < 0.999 ? ` (задано 1/${Math.round(1 / s.speed)})` : '') + (s.awake >= 0 ? ` · не спят ${s.awake}` : '');
   $('#pause').textContent = s.paused ? 'Пуск' : 'Пауза';
   if (s.attract) setStatus(`демонстрация: ${s.attract.toLowerCase()} · коснитесь экрана, чтобы управлять самим`);
   else if ($('#status').textContent.startsWith('демонстрация')) setStatus('');

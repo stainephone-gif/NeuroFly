@@ -46,9 +46,12 @@ def cmd_run(args: argparse.Namespace) -> None:
     from .data import load_brain
     from .model import SpikeRecord
 
+    from .model import Params
+
     t0 = time.perf_counter()
-    brain = load_brain(args.data_dir, seed=args.seed, release=args.release)
-    print(f"loaded {brain.n} neurons in {time.perf_counter() - t0:.1f} s", file=sys.stderr)
+    params = Params(eps=args.eps) if args.eps is not None else None
+    brain = load_brain(args.data_dir, seed=args.seed, release=args.release, params=params)
+    print(f"loaded {brain.n} neurons in {time.perf_counter() - t0:.1f} s; engine: {brain.engine}", file=sys.stderr)
 
     rel = brain.release
     stim = _parse_neurons(args.activate, rel)
@@ -151,6 +154,7 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--top", type=int, default=15)
     r.add_argument("--out", default=None, help="write all spikes to this parquet file")
     r.add_argument("--progress", action="store_true")
+    r.add_argument("--eps", type=float, default=None, help="mV below which a neuron sleeps (default 0.2)")
     r.set_defaults(func=cmd_run)
 
     s = sub.add_parser("serve", help="start the gallery server (simulation + web viewer)")

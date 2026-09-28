@@ -399,6 +399,7 @@ class Simulation(threading.Thread):
                 "speed": self.speed,
                 "realtime": self.realtime_ratio,
                 "compute": self.compute_ratio,
+                "engine": b.engine,
                 "spikes_per_s": self.spikes_per_s,
                 "active": int(np.count_nonzero(self._counts)),
                 "stim": [[int(i), float(b.stim_rate[i])] for i in stim[:5000]],
@@ -662,6 +663,8 @@ def main(host: str = "0.0.0.0", port: int = 8765, window_ms: float = 10.0, seed:
     from .model import Params
     params = Params(eps=eps) if eps is not None else None
     brain = load_brain(data_dir, seed=seed, release=release, params=params)
+    import os
+    print(f"engine: {brain.engine}; CPU threads: {os.cpu_count()}", file=sys.stderr)
     atlas = Atlas(brain.ids, data_dir)
     if prefetch_meshes:
         from .archive import fetch_meshes

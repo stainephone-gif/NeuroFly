@@ -471,6 +471,11 @@ class FlyBrain:
         return out_t[:n_out].copy(), out_i[:n_out].copy()
 
     @property
+    def engine(self) -> str:
+        from . import fast as _fast
+        return (_fast.ENGINE if self.fast else "NumPy") + f", rest threshold {self.p.eps:g} mV"
+
+    @property
     def n_awake(self) -> int:
         if self._awake_dirty:
             self._refresh_awake()

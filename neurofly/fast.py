@@ -20,10 +20,13 @@ from __future__ import annotations
 import numpy as np
 
 try:
+    import numba as _numba
     from numba import njit
     AVAILABLE = True
-except ImportError:  # pragma: no cover
+    ENGINE = f"numba {_numba.__version__}"
+except ImportError as _e:  # pragma: no cover
     AVAILABLE = False
+    ENGINE = f"NumPy only, about 8x slower (numba not importable: {_e})"
 
     def njit(*a, **k):  # type: ignore
         def deco(f):
