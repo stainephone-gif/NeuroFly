@@ -42,6 +42,14 @@ if exist ".venv" if not exist ".venv\Scripts\python.exe" (
   echo Removing a half-made .venv from an earlier attempt...
   rmdir /s /q ".venv"
 )
+rem a .venv copied from another computer points to a Python that does not exist here
+if exist ".venv\Scripts\python.exe" (
+  ".venv\Scripts\python.exe" -c "import sys" >NUL 2>&1
+  if errorlevel 1 (
+    echo The .venv folder was made on another computer and does not work here. Recreating it...
+    rmdir /s /q ".venv"
+  )
+)
 if not exist ".venv\Scripts\python.exe" (
   echo Creating virtual environment...
   !PY! -m venv .venv
