@@ -28,7 +28,8 @@ except Exception as _e:  # pragma: no cover  (ImportError, or numba refusing thi
     AVAILABLE = False
     import sys as _sys
     ENGINE = (f"NumPy only, about 8x slower: numba does not work here "
-              f"(Python {_sys.version.split()[0]}: {type(_e).__name__}: {_e})")
+              f"(Python {_sys.version.split()[0]}: {type(_e).__name__}: {_e}). On Windows this is usually the "
+              f"missing Visual C++ Redistributable: https://aka.ms/vs/17/release/vc_redist.x64.exe")
 
     def njit(*a, **k):  # type: ignore
         def deco(f):

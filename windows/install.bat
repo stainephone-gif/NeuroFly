@@ -73,8 +73,10 @@ if errorlevel 1 (echo pip install failed, see the message above & pause & exit /
 ".venv\Scripts\python.exe" -c "import numba" >NUL 2>&1
 if errorlevel 1 (
   echo.
-  echo WARNING: the numba accelerator does not work with this Python, the model will run about 8x slower.
-  echo Install Python 3.12 from python.org, delete the .venv folder and run install.bat again.
+  echo WARNING: the numba accelerator does not work here, the model will run about 8x slower.
+  echo  - "DLL load failed" / "Numba could not be imported": install Microsoft Visual C++ Redistributable
+  echo    https://aka.ms/vs/17/release/vc_redist.x64.exe  then run install.bat again;
+  echo  - otherwise install Python 3.12 from python.org, delete the .venv folder and run install.bat again.
   ".venv\Scripts\python.exe" -c "import numba"
   echo.
 )
