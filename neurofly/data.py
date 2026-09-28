@@ -56,23 +56,77 @@ def default_data_dir() -> Path:
     return Path(os.environ.get("NEUROFLY_DATA", "data")).expanduser()
 
 
+def _ssl_context():
+    """TLS context that trusts what the operating system trusts.
+
+    Python's own certificate loading on Windows reads the root store as it
+    is and never asks Windows to fetch a missing root, so a fresh machine
+    can fail with CERTIFICATE_VERIFY_FAILED where a browser works. The
+    ``truststore`` package verifies through the OS instead (the same way
+    pip does); ``certifi`` is the fallback. Verification is never disabled.
+    """
+    import ssl
+
+    try:
+        import truststore
+
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except Exception:
+        pass
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
+def _fetch_with_curl(url: str, tmp: Path) -> bool:
+    """Last resort: the system curl (on Windows it verifies through Windows itself)."""
+    import shutil
+    import subprocess
+
+    curl = shutil.which("curl")
+    if not curl:
+        return False
+    print(f"  retrying with {curl}", file=sys.stderr)
+    r = subprocess.run([curl, "-L", "--fail", "--retry", "3", "-o", str(tmp), url])
+    return r.returncode == 0 and tmp.exists()
+
+
 def _fetch(url: str, dest: Path, attempts: int = 4) -> None:
     """Download ``url`` to ``dest``; verifies the size and retries on short reads."""
+    import urllib.error
+
     tmp = dest.with_suffix(dest.suffix + ".part")
     req = urllib.request.Request(url, headers={"User-Agent": "neurofly/0.1"})
+    ctx = _ssl_context()
     for attempt in range(1, attempts + 1):
-        with urllib.request.urlopen(req) as resp, open(tmp, "wb") as out:
-            total = int(resp.headers.get("Content-Length") or 0)
-            done = 0
-            while True:
-                chunk = resp.read(1 << 20)
-                if not chunk:
-                    break
-                out.write(chunk)
-                done += len(chunk)
-                if total:
-                    sys.stderr.write(f"\r  {dest.name}: {done / 1e6:6.1f} / {total / 1e6:.1f} MB")
-            sys.stderr.write("\n")
+        try:
+            with urllib.request.urlopen(req, context=ctx) as resp, open(tmp, "wb") as out:
+                total = int(resp.headers.get("Content-Length") or 0)
+                done = 0
+                while True:
+                    chunk = resp.read(1 << 20)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    done += len(chunk)
+                    if total:
+                        sys.stderr.write(f"\r  {dest.name}: {done / 1e6:6.1f} / {total / 1e6:.1f} MB")
+                sys.stderr.write("\n")
+        except urllib.error.URLError as e:
+            if "CERTIFICATE_VERIFY_FAILED" in str(e) or "SSL" in str(e):
+                print(f"  TLS check failed for {url}: {e.reason}", file=sys.stderr)
+                if _fetch_with_curl(url, tmp):
+                    tmp.replace(dest)
+                    return
+                raise IOError(
+                    f"cannot download {url}: the certificate could not be verified.\n"
+                    "Open that address once in Edge or Chrome on this computer (Windows then fetches the\n"
+                    "missing root certificate), or download the file by hand into " + str(dest.parent)
+                ) from e
+            raise
         if not total or done == total:
             tmp.replace(dest)
             return

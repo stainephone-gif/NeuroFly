@@ -8,20 +8,20 @@ echo === NeuroFly setup ===
 echo Folder: %CD%
 echo.
 
-rem ---- find a real Python 3.10-3.13 --------------------------------------
+rem ---- find a real Python 3.10-3.14 --------------------------------------
 rem "python" on a fresh Windows is often only a Microsoft Store stub that does nothing,
 rem so try the py launcher first and check that the interpreter actually runs.
 set PY=
-for %%V in (3.12 3.11 3.13 3.10) do (
+for %%V in (3.12 3.11 3.13 3.14 3.10) do (
   if not defined PY (
     py -%%V -c "import sys" >NUL 2>&1 && set "PY=py -%%V"
   )
 )
 if not defined PY (
-  python -c "import sys; assert (3,10) <= sys.version_info[:2] <= (3,13)" >NUL 2>&1 && set "PY=python"
+  python -c "import sys; assert (3,10) <= sys.version_info[:2] <= (3,14)" >NUL 2>&1 && set "PY=python"
 )
 if not defined PY (
-  echo Python 3.10-3.13 was not found on this computer.
+  echo Python 3.10-3.14 was not found on this computer.
   echo.
   echo  1. Download Python 3.12 from https://www.python.org/downloads/windows/
   echo  2. On the first screen of the installer tick "Add python.exe to PATH"

@@ -14,6 +14,8 @@ dependencies = [
     "scipy>=1.10",
     "pandas>=2.0",
     "pyarrow>=12",
+    "truststore>=0.9",   # verify HTTPS through the OS certificate store (Windows)
+    "certifi",
 ]
 
 [project.optional-dependencies]
