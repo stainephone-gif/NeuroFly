@@ -435,8 +435,9 @@ const tour = {
         setLines(synLines, new Float32Array(0), new Float32Array(0));
         setLines(skeletonLines, new Float32Array(0), new Float32Array(0));
         setSynPoints(new Float32Array(0), new Float32Array(0));
-      } else if (name === 'memes') { if (!x) setMemes(false); }
-      else if (name === 'vocab') { setVocab(x); }
+      } else if (name === 'memes') { setMemes(!!x); }
+      else if (name === 'vocab') { if (x === FLY_TAB) setMemes(false); else { if ($('#memes').style.display === 'none') setMemes(true); setVocab(x); } }
+      else if (name === 'json') { $('#tr-json').style.display = x ? 'block' : 'none'; }
     }
   },
   async start() {
@@ -450,7 +451,7 @@ const tour = {
   stop() {
     this.i = -1; $('#tour').style.display = 'none'; $('#tour-start').classList.remove('on'); document.body.classList.remove('touring');
     send({ cmd: 'clear' }); camGoal.active = false;
-    this.run([['overlays', 'clear'], ['vocab', 'Муха'], ['memes', false]]);
+    this.run([['overlays', 'clear'], ['json', false], ['vocab', 'Муха'], ['memes', false]]);
     selectMarker.visible = false;
   },
   async next() {
@@ -480,7 +481,7 @@ const tour = {
     setTimeout(() => { $('#tour-after').textContent = st.after || ''; $('#tour-next').style.display = ''; }, st.wait || 2500);
   },
 };
-$('#tour-start').onclick = () => { if (tour.i >= 0) { tour.stop(); return; } setMemes(false); tour.start(); };
+$('#tour-start').onclick = () => (tour.i >= 0 ? tour.stop() : tour.start());
 $('#tour-close').onclick = () => tour.stop();
 $('#tour-next').onclick = () => tour.next();
 $('#tour-action').onclick = () => tour.act();
@@ -488,10 +489,10 @@ $('#tour-action').onclick = () => tour.act();
 function setMemes(open) {
   $('#memes').style.display = open ? 'block' : 'none';
   $('#memes-toggle').classList.toggle('on', open);
-  if (!open) { if (tr.vocabName !== FLY_TAB) setVocab(FLY_TAB); }
+  if (!open) { if (tr.vocabName !== FLY_TAB) setVocab(FLY_TAB); $('#tr-json').style.display = 'none'; }
   else if (tr.vocabName === FLY_TAB && tr.vocab) setVocab(Object.keys(tr.vocab.idle)[0]);
 }
-$('#memes-toggle').onclick = () => { const open = $('#memes').style.display === 'none'; if (open && tour.i >= 0) tour.stop(); setMemes(open); };
+$('#memes-toggle').onclick = () => setMemes($('#memes').style.display === 'none');
 
 // ------------------------------------------------------- translation
 const tr = { open: false, vocab: null, vocabName: 'Муха' };
@@ -507,21 +508,32 @@ async function loadVocab() {
   const names = Object.keys(tr.vocab.idle);   // meme tabs only; the fly is shown when the menu is closed
   $('#tr-vocab').innerHTML = names.map((n) => `<button data-v="${n}" class="${n === tr.vocabName ? 'on' : ''}">${n}</button>`).join('');
   for (const b of document.querySelectorAll('#tr-vocab button')) b.onclick = () => setVocab(b.dataset.v);
+  $('#tr-json').textContent = JSON.stringify(Object.fromEntries(Object.entries(tr.vocab.words).map(([k, v]) => [k, v[tr.vocabName]])), null, 1);
 }
 function renderTranslation() {
-  if (!tr.open || !state.status || !state.meta || !tr.vocab) return;
+  if (!tr.open || !state.status || !state.meta) return;
   const rates = state.status.channels || {};
-  // the video author's rule: the output channel with the highest normalised rate wins
+  const chans = state.meta.channels;
+  $('#tr-brain').innerHTML = chans.map((c) => {
+    const r = rates[c.key] || 0, f = Math.min(1, r / c.ref);
+    return `<div class="tr-row ${c.role === 'вход' ? 'in' : ''}"><span>${c.label}</span><b>${r.toFixed(0)} Гц</b><div class="tr-bar"><i style="width:${(f * 100).toFixed(0)}%"></i></div></div>`;
+  }).join('');
+  if (!tr.vocab) return;
+  // the wrapper's rule: the output channel with the highest normalised rate wins
   let best = null, bestF = 0.15;
-  for (const c of state.meta.channels) {
+  for (const c of chans) {
     if (c.role !== 'выход') continue;
     const f = (rates[c.key] || 0) / c.ref;
     if (f > bestF) { best = c.key; bestF = f; }
   }
   const name = tr.vocabName;
-  if (name === FLY_TAB) return;
-  const w = tr.vocab.words;
-  const action = best ? (w[best] && w[best][name]) || best : tr.vocab.idle[name];
+  const words = name === FLY_TAB ? FLY_WORDS : tr.vocab.words;
+  const idle = name === FLY_TAB ? 'стоит' : tr.vocab.idle[name];
+  const word = (k) => name === FLY_TAB ? FLY_WORDS[k] : (words[k] && words[k][name]);
+  const action = best ? word(best) || best : idle;
+  $('#tr-action').textContent = action;
+  $('#tr-words').innerHTML = chans.map((c) => `<div class="${c.key === best ? 'on' : ''}">${c.label.split(',')[0]} → ${word(c.key) || '—'}</div>`).join('');
+  $('#tr-json').textContent = JSON.stringify(Object.fromEntries(chans.map((c) => [c.key, word(c.key) || ''])), null, 1);
   updateStage(best, action);
 }
 
@@ -529,6 +541,7 @@ function renderTranslation() {
 function setStatus(t) { $('#status').textContent = t; }
 tr.open = true;
 loadVocab().then(renderTranslation);
+$('#tr-edit').onclick = () => { const j = $('#tr-json'); j.style.display = j.style.display === 'none' ? 'block' : 'none'; };
 // slider 0..100 -> slow-down factor 1..50 (log scale); the server paces to 1/factor of real time
 const slowFactor = (v) => Math.round(Math.pow(50, v / 100) * 10) / 10;
 $('#speed-slider').oninput = (e) => { const f = slowFactor(+e.target.value); $('#speed-out').textContent = f <= 1 ? '1×' : `1/${f}`; };
