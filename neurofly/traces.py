@@ -23,6 +23,8 @@ power cut or restart does not wipe the day.
 from __future__ import annotations
 
 import json
+import os
+import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -40,6 +42,20 @@ class TraceParams:
     tau_h: float = 8.0          # hours for the trace to decay by 1/e
     save_every_s: float = 30.0
     journal_max: int = 20000
+
+
+def _write_atomic(path: Path, write) -> None:
+    """Write through a temporary file that is flushed to disk before it replaces ``path``.
+
+    The gallery machine is switched off at the socket; without the flush a
+    file caught mid-write comes back full of zeros after the next start.
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "wb") as f:
+        write(f)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
 
 
 class Traces:
@@ -138,10 +154,8 @@ class Traces:
             "day_spikes": self.day_spikes,
             "params": asdict(self.p),
         }
-        tmp = self.dir / "state.json.tmp"
-        tmp.write_text(json.dumps(state))
-        tmp.replace(self.dir / "state.json")
-        np.save(self.dir / "gain.npy", b.gain)
+        _write_atomic(self.dir / "state.json", lambda f: f.write(json.dumps(state).encode()))
+        _write_atomic(self.dir / "gain.npy", lambda f: np.save(f, b.gain))
         self.last_save = time.time()
 
     def load(self) -> bool:
@@ -165,9 +179,14 @@ class Traces:
         self.day_spikes = int(state.get("day_spikes", 0))
         g = self.dir / "gain.npy"
         if g.exists():
-            arr = np.load(g)
-            if arr.shape == b.gain.shape:
-                b.gain[:] = arr
+            try:
+                arr = np.load(g)
+                if arr.shape == b.gain.shape and np.isfinite(arr).all():
+                    b.gain[:] = arr
+            except Exception as e:
+                # a file cut short by a power failure: the day keeps its journal, the traces start over
+                print(f"traces: {g.name} is unreadable ({type(e).__name__}); starting with clean gains",
+                      file=sys.stderr, flush=True)
         return True
 
     def new_day(self) -> None:
