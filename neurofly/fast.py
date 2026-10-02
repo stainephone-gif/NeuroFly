@@ -17,10 +17,13 @@ as the reference and the fallback when numba is not installed.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 
 try:
-    from numba import njit
+    from numba import njit, typeof
     AVAILABLE = True
 except ImportError:  # pragma: no cover
     AVAILABLE = False
@@ -32,12 +35,12 @@ except ImportError:  # pragma: no cover
 
 
 @njit(cache=True, nogil=True)
-def seed(s: int) -> None:
+def _seed(s: int) -> None:
     np.random.seed(s)
 
 
 @njit(cache=True, nogil=True)
-def run_window(
+def _run_window(
     n_steps, k0,
     v, g, last_spike, rfc_steps, silenced, gain,
     stim_idx, stim_prob,
@@ -119,3 +122,66 @@ def run_window(
                 out_i[n_out] = i
                 n_out += 1
     return n_awake, n_out
+
+
+# ------------------------------------------------------- self-healing cache
+# numba stores the compiled kernels on disk (``cache=True``) so that a start
+# takes a second instead of a recompilation. If the machine loses power while
+# those files are being written they come back full of zeros, and from then on
+# every start dies with ``UnpicklingError: invalid load key, '\x00'``. The
+# gallery computer is switched off at the socket, so this has to repair itself:
+# compile explicitly before the first call, and when that fails throw the cache
+# files away and compile again (once more without the disk cache if needed).
+
+_kernels = {"seed": _seed, "run_window": _run_window}
+_ready: set[str] = set()
+
+
+def _drop_cache(disp) -> int:
+    """Delete the on-disk cache of one kernel; returns the number of files removed."""
+    n = 0
+    try:
+        d = Path(disp.stats.cache_path)
+        stem = f"{Path(__file__).stem}.{disp.py_func.__qualname__}-"
+        for f in list(d.glob("*.nbi")) + list(d.glob("*.nbc")):
+            if f.name.startswith(stem):
+                try:
+                    f.unlink()
+                    n += 1
+                except OSError:
+                    pass
+    except Exception:
+        pass
+    return n
+
+
+def _kernel(name: str, args: tuple):
+    """The compiled kernel ``name``, ready to be called with ``args``."""
+    f = _kernels[name]
+    if name in _ready or not AVAILABLE:
+        return f
+    sig = tuple(typeof(a) for a in args)
+    try:
+        f.compile(sig)
+    except Exception as e:
+        n = _drop_cache(f)
+        print(f"numba cache of {name} is damaged ({type(e).__name__}: {e}); "
+              f"removed {n} file(s), compiling again", file=sys.stderr, flush=True)
+        try:
+            f.compile(sig)
+        except Exception as e2:
+            print(f"numba cache of {name} is still unusable ({type(e2).__name__}: {e2}); "
+                  "compiling without the disk cache", file=sys.stderr, flush=True)
+            f = _kernels[name] = njit(nogil=True)(f.py_func)
+            f.compile(sig)
+    _ready.add(name)
+    return f
+
+
+def seed(s: int) -> None:
+    _kernel("seed", (s,))(s)
+
+
+def run_window(*args):
+    """Advance the network; see :func:`_run_window` for the arguments."""
+    return _kernel("run_window", args)(*args)

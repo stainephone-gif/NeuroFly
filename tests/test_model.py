@@ -175,3 +175,89 @@ def test_synapses_of_in_and_out():
     assert b.synapses_of(IDS[1], "in")[0].tolist() == [0]
     assert b.synapses_of(IDS[1], "in")[1].tolist() == [7.0]
     assert b.synapses_of(IDS[1], "out")[1].tolist() == [-3.0]
+
+
+# ------------------------------------------------- surviving a power cut
+_KERNEL_SCRIPT = """
+import numpy as np, scipy.sparse as sp
+from neurofly.model import FlyBrain
+W = sp.lil_matrix((3, 3), dtype=np.float32); W[1, 0] = 100
+b = FlyBrain(W.tocsc(), [720575940000000001, 720575940000000002, 720575940000000003], seed=0)
+assert b.fast
+b.activate(720575940000000001, rate_hz=200)
+_, ix = b.run_fast(1000)
+print("spikes", len(ix))
+"""
+
+
+@pytest.mark.parametrize("damage", ["zeros", "empty"])
+def test_damaged_numba_cache_repairs_itself(tmp_path, damage):
+    """Files left full of zeros by a power cut must not stop the kernel from starting."""
+    pytest.importorskip("numba")
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ, NUMBA_CACHE_DIR=str(tmp_path), PYTHONPATH=str(root))
+
+    def run():
+        return subprocess.run([sys.executable, "-c", _KERNEL_SCRIPT], env=env, capture_output=True, text=True)
+
+    first = run()
+    assert first.returncode == 0, first.stderr
+    files = [f for f in tmp_path.rglob("*") if f.suffix in (".nbi", ".nbc")]
+    assert files, "the kernel did not write a cache"
+    for f in files:
+        f.write_bytes(b"\x00" * (f.stat().st_size if damage == "zeros" else 0))
+
+    second = run()
+    assert second.returncode == 0, second.stderr
+    assert second.stdout == first.stdout
+    assert "damaged" in second.stderr
+
+    third = run()   # and the repaired cache is used quietly afterwards
+    assert third.returncode == 0, third.stderr
+    assert "damaged" not in third.stderr
+
+
+def test_traces_survive_a_damaged_gain_file(tmp_path):
+    from neurofly.traces import TraceParams, Traces
+
+    b = make()
+    t = Traces(b, TraceParams(), tmp_path)
+    b.gain[1] = 1.3
+    t.log("activate", idx=[0])
+    t.save(force=True)
+    assert not list(tmp_path.glob("*.tmp"))
+
+    b2 = make()
+    Traces(b2, TraceParams(), tmp_path)
+    assert b2.gain[1] == pytest.approx(1.3)
+
+    (tmp_path / "gain.npy").write_bytes(b"\x00" * 128)
+    b3 = make()
+    t3 = Traces(b3, TraceParams(), tmp_path)
+    assert np.all(b3.gain == 1.0)
+    assert len(t3.journal) == 1
+
+    (tmp_path / "state.json").write_bytes(b"\x00" * 64)
+    t4 = Traces(make(), TraceParams(), tmp_path)
+    assert t4.journal == []
+
+
+def test_server_exits_when_the_simulation_thread_dies(monkeypatch):
+    """A crashed simulation must take the process down so the launcher restarts it."""
+    from neurofly import server
+
+    codes = []
+    monkeypatch.setattr(server.os, "_exit", codes.append)
+    sim = server.Simulation.__new__(server.Simulation)
+
+    def boom():
+        raise RuntimeError("kernel failed")
+
+    sim._loop = boom
+    sim.run()
+    assert codes == [1]

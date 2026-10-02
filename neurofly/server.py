@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import json
 import mimetypes
+import os
 import struct
 import sys
 import threading
@@ -136,6 +137,19 @@ class Simulation(threading.Thread):
         self.attract_current: dict | None = None
 
     def run(self) -> None:
+        try:
+            self._loop()
+        except BaseException:
+            # A dead simulation behind a live web server is a screen full of zeros
+            # that nothing ever restarts. Leave instead: start.bat (or any other
+            # supervisor) brings the server back and the viewer reconnects by itself.
+            import traceback
+            traceback.print_exc()
+            print("simulation thread died; exiting so that the launcher restarts the server",
+                  file=sys.stderr, flush=True)
+            os._exit(1)
+
+    def _loop(self) -> None:
         b = self.brain
         ema_wall = None
         n_keep = max(1, int(round(1000 / self.window_ms)))   # windows in the last second
