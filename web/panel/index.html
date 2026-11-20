@@ -25,6 +25,12 @@
   .tile .bg { position:absolute; inset:0; z-index:-2; width:100%; height:100%; object-fit:cover; transition:transform 6s ease; }
   .tile:hover .bg { transform:scale(1.04); }
   .tile::after { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(180deg, rgba(5,6,10,0) 30%, rgba(5,6,10,.6) 58%, rgba(5,6,10,.94) 100%); }
+  #fly-tile::after { background:linear-gradient(180deg, rgba(5,6,10,.86) 0%, rgba(5,6,10,.35) 22%, rgba(5,6,10,0) 34%, rgba(5,6,10,.6) 60%, rgba(5,6,10,.94) 100%); }
+  /* the exhibition, lettered like its poster */
+  .exh { position:absolute; left:0; right:0; top:0; padding:clamp(18px, 3vw, 40px); display:flex; justify-content:space-between; align-items:flex-start; gap:16px; text-shadow:0 1px 14px rgba(0,0,0,.7); }
+  .exh-title { font-size:clamp(20px, 2.3vw, 36px); font-weight:800; line-height:1.02; text-transform:uppercase; letter-spacing:.01em; }
+  .exh-gallery { margin-top:10px; font-size:clamp(13px, 1.25vw, 18px); font-weight:600; line-height:1.2; }
+  .exh-dates { font-size:clamp(15px, 1.6vw, 24px); font-weight:500; white-space:nowrap; font-variant-numeric:tabular-nums; }
   .tile .text { padding:clamp(18px, 3vw, 40px); text-shadow:0 1px 14px rgba(0,0,0,.6); }
   .tile .kind { font-size:clamp(13px, 1.3vw, 17px); color:#c9c6bd; letter-spacing:.08em; text-transform:uppercase; margin-bottom:8px; }
   .tile .name { font-size:clamp(30px, 4.2vw, 64px); font-weight:700; line-height:1; display:flex; align-items:center; gap:.35em; }
@@ -55,7 +61,7 @@
 </head>
 <body>
 <header>
-  <img id="logo" alt="" hidden>
+  <img id="logo" alt="Высшая школа экономики" hidden>
   <div>
     <div class="eyebrow">Магистратура</div>
     <h1>Интерактивные медиа и цифровые индустрии</h1>
@@ -63,8 +69,15 @@
 </header>
 
 <main>
-  <button class="tile" id="fly-tile" aria-label="NeuroFly: интерактивный экспонат">
+  <button class="tile" id="fly-tile" aria-label="NeuroFly: интерактивный экспонат выставки «Мозг. Искусство сознания»">
     <img class="bg" src="/panel/neurofly.jpg" alt="">
+    <div class="exh">
+      <div>
+        <div class="exh-title">Мозг<br>Искусство сознания</div>
+        <div class="exh-gallery">Галерея Краснохолмская</div>
+      </div>
+      <div class="exh-dates">29.09 — 15.11.2026</div>
+    </div>
     <div class="text">
       <div class="kind">Интерактивный экспонат</div>
       <div class="name">NeuroFly <span class="go"><svg viewBox="0 0 10 10"><path d="M2 5h6M5.5 2.5 8 5 5.5 7.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div>
