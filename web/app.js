@@ -342,7 +342,7 @@ const arena = new FlyArena(document.querySelector('#fly'));
 
 // ---------------------------------------------- stage: fly or meme video
 const FLY_WORDS = { sugar: 'пробует лапкой', mn9: 'вытягивает хоботок', p9: 'идёт вперёд', mdn: 'пятится', dna02_l: 'поворачивает влево', dna02_r: 'поворачивает вправо', gf: 'прыгает' };
-const stage = { clip: null };
+const stage = { clip: null, fallback: false, warned: new Set() };
 function videoFor(name, key) {
   const v = tr.vocab && tr.vocab.videos && tr.vocab.videos[name];
   if (!v) return null;
@@ -351,6 +351,7 @@ function videoFor(name, key) {
 }
 function setStage() {
   const meme = tr.vocabName !== FLY_TAB;
+  stage.fallback = false;
   $('#fly').style.display = meme ? 'none' : 'block';
   $('#meme-video').style.display = meme ? 'block' : 'none';
   $('#meme-caption').style.display = meme ? 'block' : 'none';
@@ -359,19 +360,30 @@ function setStage() {
   $('#arena-note').textContent = meme
     ? 'Ролик из интернета. Подпись берётся из словаря мема: это всё, что связывает видео с мозгом.'
     : 'Телом управляют только каналы мозга: DNp09 вперёд, MDN назад, DNa02 повороты, MN9 хоботок, DNp01 прыжок. Слева можно проверить, как одна новая связь меняет поведение.';
-  if (!meme) { const v = $('#meme-video'); v.pause(); v.removeAttribute('src'); v.load(); stage.clip = null; $('#meme-missing').style.display = 'none'; }
+  if (!meme) { const v = $('#meme-video'); v.pause(); v.removeAttribute('src'); v.load(); stage.clip = null; }
+}
+// No clip on this machine: the visitor sees the fly under the meme's caption; the instruction goes to the console.
+function memeFallback(on, why) {
+  stage.fallback = on;
+  $('#fly').style.display = on ? 'block' : 'none';
+  $('#meme-video').style.display = on ? 'none' : 'block';
+  $('#arena-action').textContent = on ? 'ролика нет, вместо него муха' : 'так это выглядит в ролике';
+  $('#arena-note').textContent = on
+    ? 'Ролика здесь нет, поэтому показана муха. Подпись всё равно берётся из словаря мема: это всё, что связывает видео с мозгом.'
+    : 'Ролик из интернета. Подпись берётся из словаря мема: это всё, что связывает видео с мозгом.';
+  if (on && why && !stage.warned.has(why)) { stage.warned.add(why); console.warn(why); }
 }
 function updateStage(best, action) {
   if (tr.vocabName === FLY_TAB) return;
   $('#meme-caption').textContent = action;
   const file = videoFor(tr.vocabName, best);
   const v = $('#meme-video');
-  if (!file) { v.style.display = 'none'; $('#meme-missing').style.display = 'flex'; $('#meme-missing').textContent = `нет видео для «${tr.vocabName}»: укажите файл в web/vocab.json`; return; }
+  if (!file) { stage.clip = null; memeFallback(true, `NeuroFly: нет видео для «${tr.vocabName}», укажите файл в web/vocab.json`); return; }
   if (stage.clip !== file) {
     stage.clip = file;
-    v.style.display = 'block'; $('#meme-missing').style.display = 'none';
+    memeFallback(false);
     v.src = `/memes/${encodeURIComponent(file)}`;
-    v.onerror = () => { v.style.display = 'none'; $('#meme-missing').style.display = 'flex'; $('#meme-missing').textContent = `положите файл web/memes/${file}`; };
+    v.onerror = () => { if (stage.clip === file) memeFallback(true, `NeuroFly: положите файл web/memes/${file}`); };
     v.play().catch(() => {});
   }
 }
@@ -566,6 +578,7 @@ function showQuick() { if (QUICK.length) quick.show(QUICK); }
 function setMemes(open) {
   $('#memes').style.display = open ? 'block' : 'none';
   $('#memes-toggle').classList.toggle('on', open);
+  document.body.classList.toggle('memes', open);
   if (!open) { if (tr.vocabName !== FLY_TAB) setVocab(FLY_TAB); $('#tr-json').style.display = 'none'; }
   else if (tr.vocabName === FLY_TAB && tr.vocab) setVocab(Object.keys(tr.vocab.idle)[0]);
 }
@@ -689,7 +702,8 @@ async function main() {
       if (camera.position.distanceTo(camGoal.pos) < 1) camGoal.active = false;
     }
     pointMat.uniforms.uScale.value = innerHeight / 2;
-    if (tr.vocabName === FLY_TAB) { arena.step(Math.min(dt, 0.1)); $('#arena-action').textContent = arena.action; }
+    if (tr.vocabName === FLY_TAB || stage.fallback) arena.step(Math.min(dt, 0.1));
+    if (tr.vocabName === FLY_TAB) $('#arena-action').textContent = arena.action;
     controls.update();
     renderer.render(scene, camera);
   });
