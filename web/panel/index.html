@@ -25,7 +25,7 @@
   .tile .bg { position:absolute; inset:0; z-index:-2; width:100%; height:100%; object-fit:cover; transition:transform 6s ease; }
   .tile:hover .bg { transform:scale(1.04); }
   .tile::after { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(180deg, rgba(5,6,10,0) 30%, rgba(5,6,10,.6) 58%, rgba(5,6,10,.94) 100%); }
-  #fly-tile::after { background:linear-gradient(180deg, rgba(5,6,10,.86) 0%, rgba(5,6,10,.35) 22%, rgba(5,6,10,0) 34%, rgba(5,6,10,.6) 60%, rgba(5,6,10,.94) 100%); }
+  #fly-tile::after { background:linear-gradient(180deg, rgba(5,6,10,.6) 0%, rgba(5,6,10,.15) 22%, rgba(5,6,10,0) 32%, rgba(5,6,10,.6) 60%, rgba(5,6,10,.94) 100%); }
   /* the exhibition, lettered like its poster */
   .exh { position:absolute; left:0; right:0; top:0; padding:clamp(18px, 3vw, 40px); display:flex; justify-content:space-between; align-items:flex-start; gap:16px; text-shadow:0 1px 14px rgba(0,0,0,.7); }
   .exh-title { font-size:clamp(20px, 2.3vw, 36px); font-weight:800; line-height:1.02; text-transform:uppercase; letter-spacing:.01em; }
@@ -37,7 +37,7 @@
   .tile .sub { margin-top:10px; font-size:clamp(15px, 1.6vw, 22px); color:var(--fg); opacity:.85; max-width:30ch; }
   .tile .go { display:inline-flex; align-items:center; justify-content:center; width:1em; height:1em; border-radius:50%; font-size:.8em; background:var(--acc); color:#1a1300; }
   .tile .go svg { width:42%; height:42%; }
-  #fly-tile .bg { background:#05060a; object-position:50% 20%; }
+  #fly-tile .bg { background:#05060a; }
   #trailer-tile .bg.fallback { background:radial-gradient(80% 90% at 70% 30%, rgba(255,209,102,.22), transparent 70%), radial-gradient(70% 80% at 20% 80%, rgba(79,209,255,.18), transparent 70%), #0b0d14; }
 
   footer { color:var(--dim); text-align:center; font-size:clamp(13px, 1.3vw, 16px); }
