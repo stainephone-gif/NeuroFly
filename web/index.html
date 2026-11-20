@@ -12,7 +12,7 @@
   #hud h1 { margin:0 0 4px; font-size:20px; font-weight:600; letter-spacing:.04em; }
   #hud .row { color:var(--dim); font-variant-numeric: tabular-nums; }
   #hud b { color:var(--fg); font-weight:500; }
-  #tools { position:fixed; left:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; width:min(92vw, 560px); max-height:calc(100vh - 32px); overflow:auto; }
+  #tools { position:fixed; left:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; width:min(92vw, 560px); max-height:calc(100vh - 150px); overflow:auto; }
   #tools::-webkit-scrollbar { width:0; }
   .panel { background:var(--panel); backdrop-filter: blur(10px); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px 12px; }
   .modes { display:flex; gap:6px; flex-wrap:wrap; }
@@ -38,12 +38,15 @@
   #info .stats b { color:var(--fg); font-weight:500; }
   #info .actions { display:flex; gap:6px; flex-wrap:wrap; }
   #hint { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); color:var(--dim); pointer-events:none; text-align:center; font-size:13px; }
-  #feed div { color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #feed div:last-child { color:var(--fg); }
   #translate { display:block; }
   #arena { position:fixed; right:16px; bottom:16px; width:min(94vw, 400px); }
   #tour { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); width:min(92vw, 520px); display:none; border-color:rgba(255,209,102,.35); z-index:5; }
-  body.touring #legend, body.touring #hint { display:none; }
+  body.touring #legend, body.touring #hint, body.touring #quick-body, body.memes #quick-body { display:none; }
+  .q-title { margin:2px 0 4px; font-size:22px; font-weight:650; line-height:1.2; }
+  .q-result { font-size:18px; font-weight:600; margin-top:8px; }
+  .q-result:empty { display:none; }
+  #quick .more { margin-top:12px; padding-top:10px; border-top:1px solid rgba(255,255,255,.08); }
+  body.touring #quick .more, body.memes #quick .more { margin-top:0; padding-top:0; border-top:0; }
   #tour .hint { font-size:15px; line-height:1.4; }
   button.accent { border-color:var(--acc); color:var(--acc); }
   .big-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
@@ -56,7 +59,6 @@
   #arena canvas { display:block; width:100%; height:340px; }
   #meme-video { display:none; width:100%; height:340px; object-fit:cover; border-radius:8px; background:#000; }
   #meme-caption { position:absolute; left:0; right:0; bottom:14px; text-align:center; font-size:24px; font-weight:700; color:#fff; text-shadow:0 2px 12px rgba(0,0,0,.9), 0 0 2px #000; padding:0 12px; display:none; }
-  #meme-missing { position:absolute; inset:0; display:none; align-items:center; justify-content:center; text-align:center; padding:24px; }
   .tr-head { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
   .tr-head b { font-size:15px; }
   .tr-vocab { display:flex; gap:4px; flex:1; flex-wrap:wrap; }
@@ -88,16 +90,26 @@
   <div class="row">время модели <b id="t">0.00 с</b> · скорость <b id="speed">…</b></div>
   <div class="row">спайков/с <b id="rate">0</b> · активных нейронов <b id="active">0</b></div>
   <div class="row">возбуждено <b id="n-stim">0</b> · выключено <b id="n-sil">0</b> · ваших связей <b id="n-extra">0</b></div>
-  <div class="row" id="day">сегодня: <b id="day-actions">0</b> вмешательств · след в <b id="day-traced">0</b> нейронах</div>
-  <div id="feed" class="row" style="margin-top:6px; font-size:12px; max-width:420px"></div>
 </div>
 <div id="status"></div>
 
 <div id="tools">
-  <div class="panel">
-    <div class="big-row">
-      <button id="tour-start" class="big accent">Экскурсия</button>
-      <button id="memes-toggle" class="big accent">Мемы про мозг мухи</button>
+  <div class="panel" id="quick">
+    <div id="quick-body">
+      <div class="caption">Модель мозга дрозофилы</div>
+      <h2 id="q-title" class="q-title"></h2>
+      <div id="q-text" class="hint"></div>
+      <div id="q-result" class="q-result"></div>
+      <div id="q-after" class="hint" style="color:var(--acc)"></div>
+      <div class="modes" style="margin-top:10px">
+        <button id="q-action" class="big on"></button>
+        <button id="q-next" class="big accent"></button>
+        <button id="q-retry" class="big">Повторить</button>
+      </div>
+    </div>
+    <div class="modes more">
+      <button id="tour-start" class="accent">Разобрать, как это работает</button>
+      <button id="memes-toggle" class="accent">Тот же сигнал, другой смысл</button>
     </div>
     <div class="caption" style="margin-top:8px">Щёлкните по любой точке мозга, чтобы узнать, что это за нейрон.</div>
   </div>
@@ -134,7 +146,6 @@
       </div>
       <div class="modes" style="margin-top:8px">
         <button id="pause">Пауза</button>
-        <button id="new-day" class="danger" title="забыть весь день: следы, лезии, связи">Новый день</button>
       </div>
     </details>
   </div>
@@ -158,10 +169,12 @@
 <div id="tour" class="panel">
   <div class="tr-head"><b id="tour-title"></b><span class="caption" id="tour-step" style="flex:1"></span><button id="tour-close">×</button></div>
   <div id="tour-text" class="hint"></div>
+  <div id="tour-result" class="q-result"></div>
   <div id="tour-after" class="hint" style="color:var(--acc)"></div>
   <div class="modes" style="margin-top:10px">
     <button id="tour-action" class="on"></button>
     <button id="tour-next">Дальше</button>
+    <button id="tour-retry">Повторить</button>
   </div>
 </div>
 <div id="arena" class="panel">
@@ -170,9 +183,8 @@
     <canvas id="fly"></canvas>
     <video id="meme-video" muted loop playsinline preload="auto"></video>
     <div id="meme-caption"></div>
-    <div id="meme-missing" class="caption"></div>
   </div>
-  <div class="caption" id="arena-note">Телом управляют только каналы мозга: DNp09 вперёд, MDN назад, DNa02 повороты, MN9 хоботок, DNp01 прыжок. В экскурсии видно, как одна новая связь меняет походку.</div>
+  <div class="caption" id="arena-note">Телом управляют только каналы мозга: DNp09 вперёд, MDN назад, DNa02 повороты, MN9 хоботок, DNp01 прыжок. Слева можно проверить, как одна новая связь меняет поведение.</div>
 </div>
 <div id="legend"></div>
 <div id="hint">колесо: масштаб · перетаскивание: вращение</div>

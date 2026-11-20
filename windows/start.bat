@@ -9,7 +9,7 @@ set PYTHONPATH=%CD%
 rem ---- settings ---------------------------------------------------------
 set PORT=8765
 set KIOSK=1
-rem extra server options, e.g. --hold 30 --trace-alpha 0 --fresh
+rem extra server options, e.g. --hold 30 --idle 60
 set OPTIONS=
 rem -----------------------------------------------------------------------
 

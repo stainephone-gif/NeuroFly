@@ -1,7 +1,7 @@
 // NeuroFly gallery screen: 138k neurons as a living point cloud.
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
-import { FlyArena } from './fly.js';
+import { FlyArena, BODY_RULES } from './fly.js';
 
 const $ = (s) => document.querySelector(s);
 const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
@@ -273,7 +273,7 @@ function connect() {
     if (ev.data instanceof ArrayBuffer) { onFrame(ev.data); return; }
     const msg = JSON.parse(ev.data);
     if (msg.type === 'status') onStatus(msg);
-    else if (msg.type === 'channels') { arena.setRates(msg.rates); if (state.status) { state.status.channels = msg.rates; renderTranslation(); } }
+    else if (msg.type === 'channels') { state.rates = msg.rates; state.channelsAt = performance.now(); arena.setRates(msg.rates); if (state.status) { state.status.channels = msg.rates; renderTranslation(); } }
     else if (msg.type === 'info') onInfo(msg);
     else if (msg.type === 'error') setStatus('ошибка: ' + msg.message);
   };
@@ -294,6 +294,7 @@ function onFrame(buf) {
 }
 
 function onStatus(s) {
+  if (s.idle && !(state.status && state.status.idle)) resetView();   // the visitor left; the server has cleared the brain
   state.status = s;
   state.stimMap = new Map(s.stim);
   state.silSet = new Set(s.silenced);
@@ -305,16 +306,6 @@ function onStatus(s) {
     points.geometry.attributes.flag.needsUpdate = true;
   }
   drawExtra(s.extra); drawContacts(s.extra);
-  if (s.traces) {
-    const tr = s.traces;
-    $('#day-actions').textContent = tr.actions; $('#day-traced').textContent = tr.traced_neurons;
-    const verb = { activate: 'возбудил', silence: 'выключил', unsilence: 'включил', connect: 'связал', disconnect: 'разорвал', clear: 'снял всё' };
-    $('#feed').innerHTML = tr.recent.slice(-4).map((e) => {
-      const t = new Date(e.t * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
-      const what = e.action === 'connect' ? e.label : (e.label ? `${e.label}${e.n > 1 ? ' × ' + e.n : ''}` : '');
-      return `<div>${t} · ${verb[e.action] || e.action} ${what}</div>`;
-    }).join('');
-  }
   renderTranslation();
   $('#n-stim').textContent = s.n_stim; $('#n-sil').textContent = s.n_silenced; $('#n-extra').textContent = s.n_extra;
   $('#rate').textContent = Math.round(s.spikes_per_s); $('#active').textContent = s.active;
@@ -343,7 +334,6 @@ function onInfo(info) {
   st.push(['входов', `${info.n_in} нейронов · ${info.syn_in} синапсов`]);
   st.push(['выходов', `${info.n_out} нейронов · ${info.syn_out} синапсов`]);
   st.push(['состояние', info.silenced ? 'выключен' : info.stim > 0 ? `возбуждён ${info.stim} Гц` : 'обычное']);
-  if (info.gain && Math.abs(info.gain - 1) > 0.001) st.push(['след дня', `выходы × ${info.gain.toFixed(3)}`]);
   $('#info-stats').innerHTML = st.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('');
 }
 
@@ -352,7 +342,7 @@ const arena = new FlyArena(document.querySelector('#fly'));
 
 // ---------------------------------------------- stage: fly or meme video
 const FLY_WORDS = { sugar: 'пробует лапкой', mn9: 'вытягивает хоботок', p9: 'идёт вперёд', mdn: 'пятится', dna02_l: 'поворачивает влево', dna02_r: 'поворачивает вправо', gf: 'прыгает' };
-const stage = { clip: null };
+const stage = { clip: null, fallback: false, warned: new Set() };
 function videoFor(name, key) {
   const v = tr.vocab && tr.vocab.videos && tr.vocab.videos[name];
   if (!v) return null;
@@ -361,6 +351,7 @@ function videoFor(name, key) {
 }
 function setStage() {
   const meme = tr.vocabName !== FLY_TAB;
+  stage.fallback = false;
   $('#fly').style.display = meme ? 'none' : 'block';
   $('#meme-video').style.display = meme ? 'block' : 'none';
   $('#meme-caption').style.display = meme ? 'block' : 'none';
@@ -368,20 +359,31 @@ function setStage() {
   $('#arena-action').textContent = meme ? 'так это выглядит в ролике' : arena.action;
   $('#arena-note').textContent = meme
     ? 'Ролик из интернета. Подпись берётся из словаря мема: это всё, что связывает видео с мозгом.'
-    : 'Телом управляют только каналы мозга: DNp09 вперёд, MDN назад, DNa02 повороты, MN9 хоботок, DNp01 прыжок. В экскурсии видно, как одна новая связь меняет походку.';
-  if (!meme) { const v = $('#meme-video'); v.pause(); v.removeAttribute('src'); v.load(); stage.clip = null; $('#meme-missing').style.display = 'none'; }
+    : 'Телом управляют только каналы мозга: DNp09 вперёд, MDN назад, DNa02 повороты, MN9 хоботок, DNp01 прыжок. Слева можно проверить, как одна новая связь меняет поведение.';
+  if (!meme) { const v = $('#meme-video'); v.pause(); v.removeAttribute('src'); v.load(); stage.clip = null; }
+}
+// No clip on this machine: the visitor sees the fly under the meme's caption; the instruction goes to the console.
+function memeFallback(on, why) {
+  stage.fallback = on;
+  $('#fly').style.display = on ? 'block' : 'none';
+  $('#meme-video').style.display = on ? 'none' : 'block';
+  $('#arena-action').textContent = on ? 'ролика нет, вместо него муха' : 'так это выглядит в ролике';
+  $('#arena-note').textContent = on
+    ? 'Ролика здесь нет, поэтому показана муха. Подпись всё равно берётся из словаря мема: это всё, что связывает видео с мозгом.'
+    : 'Ролик из интернета. Подпись берётся из словаря мема: это всё, что связывает видео с мозгом.';
+  if (on && why && !stage.warned.has(why)) { stage.warned.add(why); console.warn(why); }
 }
 function updateStage(best, action) {
   if (tr.vocabName === FLY_TAB) return;
   $('#meme-caption').textContent = action;
   const file = videoFor(tr.vocabName, best);
   const v = $('#meme-video');
-  if (!file) { v.style.display = 'none'; $('#meme-missing').style.display = 'flex'; $('#meme-missing').textContent = `нет видео для «${tr.vocabName}»: укажите файл в web/vocab.json`; return; }
+  if (!file) { stage.clip = null; memeFallback(true, `NeuroFly: нет видео для «${tr.vocabName}», укажите файл в web/vocab.json`); return; }
   if (stage.clip !== file) {
     stage.clip = file;
-    v.style.display = 'block'; $('#meme-missing').style.display = 'none';
+    memeFallback(false);
     v.src = `/memes/${encodeURIComponent(file)}`;
-    v.onerror = () => { v.style.display = 'none'; $('#meme-missing').style.display = 'flex'; $('#meme-missing').textContent = `положите файл web/memes/${file}`; };
+    v.onerror = () => { if (stage.clip === file) memeFallback(true, `NeuroFly: положите файл web/memes/${file}`); };
     v.play().catch(() => {});
   }
 }
@@ -402,93 +404,181 @@ function presetIdx(key) {
   const c = state.meta.channels && state.meta.channels.find((q) => q.key === key);   // e.g. mn9
   return c && c.idx ? c.idx : [];
 }
-let TOUR = [];
+let TOUR = [], QUICK = [];
 async function loadTour() {
   try {
     const j = await (await fetch('/tour.json')).json();
     TOUR = j.parts.flatMap((p) => p.steps.map((st) => ({ ...st, part: p.name })));
-  } catch (e) { TOUR = []; }
+    QUICK = j.quick || [];
+  } catch (e) { TOUR = []; QUICK = []; }
 }
-const tour = {
-  i: -1,
-  scenario(key, on) {
-    const p = state.meta.presets.find((q) => q.key === key); if (!p) return;
-    send({ cmd: on ? 'activate' : 'deactivate', idx: p.idx, rate: p.rate, hold: 0 });
-  },
-  connect(fromKey, toKey) {
-    const a = presetIdx(fromKey), b = presetIdx(toKey); if (!a.length || !b.length) return;
-    send({ cmd: 'connect', pre: a[0], post: b[0], pres: a, posts: b, n: 30, sign: 1 });
-  },
-  async run(ops) {
-    for (const op of ops || []) {
-      const [name, x, y] = op;
-      if (name === 'scenario') this.scenario(x, y);
-      else if (name === 'connect') this.connect(x, y);
-      else if (name === 'disconnect') send({ cmd: 'disconnect' });
-      else if (name === 'wait') await new Promise((r) => setTimeout(r, x));
-      else if (name === 'info') {
-        if (!state.info) continue;
-        if (x === 'lines') showSynapses(state.info);
-        else if (x === 'skeleton') showSkeleton(state.info.idx);
-        else if (x === 'points') showSynapsePoints(state.info.idx);
-      } else if (name === 'overlays') {
-        setLines(synLines, new Float32Array(0), new Float32Array(0));
-        setLines(skeletonLines, new Float32Array(0), new Float32Array(0));
-        setSynPoints(new Float32Array(0), new Float32Array(0));
-      } else if (name === 'memes') { setMemes(!!x); }
-      else if (name === 'vocab') { if (x === FLY_TAB) setMemes(false); else { if ($('#memes').style.display === 'none') setMemes(true); setVocab(x); } }
-      else if (name === 'json') { $('#tr-json').style.display = x ? 'block' : 'none'; }
-    }
-  },
-  async start() {
-    if (!TOUR.length) await loadTour();
-    if (!TOUR.length) { setStatus('экскурсия не загрузилась'); return; }
-    controls.autoRotate = false;
-    send({ cmd: 'clear' });
-    $('#tour').style.display = 'block'; $('#tour-start').classList.add('on'); document.body.classList.add('touring');
-    this.i = -1; this.next();
-  },
-  stop() {
-    this.i = -1; $('#tour').style.display = 'none'; $('#tour-start').classList.remove('on'); document.body.classList.remove('touring');
-    send({ cmd: 'clear' }); camGoal.active = false;
-    this.run([['overlays', 'clear'], ['json', false], ['vocab', 'Муха'], ['memes', false]]);
-    selectMarker.visible = false;
-  },
-  async next() {
+function scenario(key, on) {
+  const p = state.meta.presets.find((q) => q.key === key); if (!p) return;
+  send({ cmd: on ? 'activate' : 'deactivate', idx: p.idx, rate: p.rate, hold: 0 });
+}
+function connectGroups(fromKey, toKey) {
+  const a = presetIdx(fromKey), b = presetIdx(toKey); if (!a.length || !b.length) return;
+  send({ cmd: 'connect', pre: a[0], post: b[0], pres: a, posts: b, n: 30, sign: 1 });
+}
+async function runOps(ops) {
+  for (const op of ops || []) {
+    const [name, x, y] = op;
+    if (name === 'scenario') scenario(x, y);
+    else if (name === 'connect') connectGroups(x, y);
+    else if (name === 'disconnect') send({ cmd: 'disconnect' });
+    else if (name === 'clear') send({ cmd: 'clear' });
+    else if (name === 'wait') await new Promise((r) => setTimeout(r, x));
+    else if (name === 'info') {
+      if (!state.info) continue;
+      if (x === 'lines') showSynapses(state.info);
+      else if (x === 'skeleton') showSkeleton(state.info.idx);
+      else if (x === 'points') showSynapsePoints(state.info.idx);
+    } else if (name === 'overlays') {
+      setLines(synLines, new Float32Array(0), new Float32Array(0));
+      setLines(skeletonLines, new Float32Array(0), new Float32Array(0));
+      setSynPoints(new Float32Array(0), new Float32Array(0));
+    } else if (name === 'memes') { setMemes(!!x); }
+    else if (name === 'vocab') { if (x === FLY_TAB) setMemes(false); else { if ($('#memes').style.display === 'none') setMemes(true); setVocab(x); } }
+    else if (name === 'json') { $('#tr-json').style.display = x ? 'block' : 'none'; }
+  }
+}
+
+// ---------------------------------------------------- what the fly did
+// The result of a step is read from the output channels that move the fly
+// (BODY_RULES in fly.js), never assumed after a pause.
+const MOVES = [['proboscis', 'хоботок'], ['forward', 'шаг вперёд'], ['backward', 'шаг назад']];
+const SEEN = 0.3;          // share of the channel's reference rate that counts as a movement
+const SETTLE_MS = 1500;    // channel rates are one-second means; the response settles in about 1.3 s
+const GIVE_UP_MS = 4000;
+function movesNow() {
+  const r = state.rates || {};
+  return MOVES.map(([k]) => k).filter((k) => (r[BODY_RULES[k].channel] || 0) / BODY_RULES[k].ref >= SEEN);
+}
+const sameSet = (a, b) => a.length === b.length && a.every((k) => b.includes(k));
+function readout(expect) {
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    let last = null, steady = 0;
+    const tick = () => {
+      const now = performance.now();
+      if (now - (state.channelsAt || 0) > 1000) { resolve({ offline: true }); return; }
+      const seen = movesNow(), key = seen.join();
+      steady = key === last ? steady + 1 : 0; last = key;
+      const match = sameSet(seen, expect);
+      if (now - t0 >= SETTLE_MS && ((match && steady >= 3) || now - t0 >= GIVE_UP_MS)) { resolve({ seen, match }); return; }
+      setTimeout(tick, 100);
+    };
+    setTimeout(tick, 200);
+  });
+}
+const chainText = (cause, seen) => `${cause} → ${seen.length ? seen.map((k) => MOVES.find((m) => m[0] === k)[1]).join(' + ') : 'нет движения'}`;
+
+// A sequence of steps shown in one panel: the short experiment and the full tour.
+class Guide {
+  constructor(prefix, opts = {}) {
+    const el = (n) => $(`#${prefix}-${n}`);
+    this.ui = { title: el('title'), step: el('step'), text: el('text'), result: el('result'), after: el('after'), action: el('action'), next: el('next'), retry: el('retry') };
+    this.o = opts; this.steps = []; this.i = -1; this.run = 0;
+    this.ui.action.onclick = () => this.act();
+    this.ui.next.onclick = () => this.next(!!this.o.chain);
+    this.ui.retry.onclick = () => { this.i -= 1; this.next(true); };
+  }
+  say(result, after) { this.ui.result.textContent = result || ''; this.ui.after.textContent = after || ''; }
+  show(steps) {   // draw the first step without running anything
+    this.steps = steps; this.i = 0; this.run += 1;
+    this.render(this.steps[0]);
+  }
+  start(steps) { this.steps = steps; this.i = -1; this.next(); }
+  stop(quiet) {
+    if (this.i < 0) return;
+    this.i = -1; this.run += 1;
+    if (this.o.onStop) this.o.onStop(quiet);
+  }
+  render(st) {
+    const ui = this.ui;
+    ui.title.textContent = st.title;
+    if (ui.step && this.o.stepLabel) ui.step.textContent = this.o.stepLabel(st, this.i, this.steps.length);
+    ui.text.textContent = st.text || ''; this.say('', '');
+    ui.action.style.display = st.action ? '' : 'none';
+    if (st.action) { ui.action.textContent = st.action; ui.action.disabled = false; }
+    ui.retry.style.display = 'none';
+    this.setNext(st);
+    ui.next.style.display = st.action ? 'none' : '';
+  }
+  setNext(st) {
+    const following = this.steps[this.i + 1];
+    this.ui.next.textContent = st.next || (st.last || !following ? 'Закончить' : (this.o.chain && following.action) || 'Дальше');
+  }
+  async next(auto = false) {
     this.i += 1;
-    if (this.i >= TOUR.length) { this.stop(); return; }
-    const st = TOUR[this.i];
+    if (this.i >= this.steps.length) { if (this.o.onEnd) this.o.onEnd(); else this.stop(); return; }
+    const st = this.steps[this.i], run = ++this.run;
     setStatus('');
-    await this.run(st.before);
-    $('#tour-title').textContent = st.title; $('#tour-step').textContent = `${st.part} · ${this.i + 1} / ${TOUR.length}`;
-    $('#tour-text').textContent = st.text; $('#tour-after').textContent = '';
-    const act = $('#tour-action');
-    act.style.display = st.action ? '' : 'none';
-    if (st.action) { act.textContent = st.action; act.disabled = false; }
-    $('#tour-next').textContent = st.last ? 'Закончить' : (st.next || 'Дальше');
-    $('#tour-next').style.display = st.action ? 'none' : '';
+    await runOps(st.before);
+    if (run !== this.run) return;
+    this.render(st);
     const fi = st.focus ? presetIdx(st.focus)[0] : null;
     if (fi !== null && fi !== undefined) {
       focusOn(fi);
       if (!state.info || state.info.idx !== fi) { setLines(synLines, new Float32Array(0), new Float32Array(0)); select(fi); }
     } else if (!st.keepFocus) { camGoal.active = false; }
     if (st.lines) { const li = presetIdx(st.lines)[0]; if (li !== undefined) setTimeout(() => { if (state.info && state.info.idx === li) showSynapses(state.info); }, 700); }
-  },
+    if (auto && st.action) this.act();
+  }
   async act() {
-    const st = TOUR[this.i]; if (!st || !st.action) return;
-    $('#tour-action').disabled = true;
-    await this.run(st.ops);
-    setTimeout(() => { $('#tour-after').textContent = st.after || ''; $('#tour-next').style.display = ''; }, st.wait || 2500);
+    const st = this.steps[this.i]; if (!st || !st.action) return;
+    if (this.o.beforeAct) this.o.beforeAct();
+    const ui = this.ui, run = this.run;
+    ui.action.style.display = 'none'; ui.next.style.display = 'none'; ui.retry.style.display = 'none';
+    await runOps(st.ops);
+    if (run !== this.run) return;   // the guide moved on or was closed meanwhile
+    if (!st.expect) { this.say('', st.after); ui.next.style.display = ''; return; }
+    this.say('Считаем отклик…', '');
+    const r = await readout(st.expect);
+    if (run !== this.run) return;
+    if (r.offline) { this.say('Нет связи с симуляцией', 'Проверьте, что сервер запущен, и повторите.'); ui.retry.style.display = ''; return; }
+    const line = chainText(st.cause || 'Сигнал', r.seen);
+    if (r.match) { this.say(line, st.after); ui.next.style.display = ''; return; }
+    this.say(line, 'Сейчас муха ответила не так, как в описании этого шага. Повторите опыт.');
+    ui.retry.style.display = '';
+    ui.next.style.display = '';
+  }
+}
+
+const tour = new Guide('tour', {
+  stepLabel: (st, i, n) => `${st.part} · ${i + 1} / ${n}`,
+  onStop(quiet) {   // quiet: the brain is already clean, and a command would end the demonstration
+    $('#tour').style.display = 'none'; $('#tour-start').classList.remove('on'); document.body.classList.remove('touring');
+    if (!quiet) send({ cmd: 'clear' });
+    camGoal.active = false;
+    runOps([['overlays', 'clear'], ['json', false], ['vocab', 'Муха'], ['memes', false]]);
+    selectMarker.visible = false;
   },
-};
-$('#tour-start').onclick = () => (tour.i >= 0 ? tour.stop() : tour.start());
+});
+async function startTour() {
+  if (!TOUR.length) await loadTour();
+  if (!TOUR.length) { setStatus('экскурсия не загрузилась'); return; }
+  showQuick();
+  controls.autoRotate = false;
+  send({ cmd: 'clear' });
+  $('#tour').style.display = 'block'; $('#tour-start').classList.add('on'); document.body.classList.add('touring');
+  tour.start(TOUR);
+}
+$('#tour-start').onclick = () => (tour.i >= 0 ? tour.stop() : startTour());
 $('#tour-close').onclick = () => tour.stop();
-$('#tour-next').onclick = () => tour.next();
-$('#tour-action').onclick = () => tour.act();
+
+// the short experiment on the first screen; each step's button runs the next step
+const quick = new Guide('q', {
+  chain: true,
+  beforeAct() { if (tour.i >= 0) tour.stop(); controls.autoRotate = false; },
+  onEnd() { send({ cmd: 'clear' }); showQuick(); },
+});
+function showQuick() { if (QUICK.length) quick.show(QUICK); }
 
 function setMemes(open) {
   $('#memes').style.display = open ? 'block' : 'none';
   $('#memes-toggle').classList.toggle('on', open);
+  document.body.classList.toggle('memes', open);
   if (!open) { if (tr.vocabName !== FLY_TAB) setVocab(FLY_TAB); $('#tr-json').style.display = 'none'; }
   else if (tr.vocabName === FLY_TAB && tr.vocab) setVocab(Object.keys(tr.vocab.idle)[0]);
 }
@@ -547,21 +637,22 @@ const slowFactor = (v) => Math.round(Math.pow(50, v / 100) * 10) / 10;
 $('#speed-slider').oninput = (e) => { const f = slowFactor(+e.target.value); $('#speed-out').textContent = f <= 1 ? '1×' : `1/${f}`; };
 $('#speed-slider').onchange = (e) => { const f = slowFactor(+e.target.value); send({ cmd: 'speed', value: 1 / f }); };
 $('#pause').onclick = () => send({ cmd: state.status && state.status.paused ? 'play' : 'pause' });
-$('#clear').onclick = () => {
-  if (tour.i >= 0) tour.stop();
-  send({ cmd: 'clear' });
+// the screen as a new visitor finds it; the server clears the brain itself when the demonstration starts
+function resetView() {
+  if (tour.i >= 0) tour.stop(true);
+  showQuick();
   setLines(synLines, new Float32Array(0), new Float32Array(0));
   setLines(skeletonLines, new Float32Array(0), new Float32Array(0));
   setSynPoints(new Float32Array(0), new Float32Array(0));
   setMemes(false);
   $('#info').style.display = 'none'; selectMarker.visible = false; state.selected = null;
   frameCamera(); controls.autoRotate = true;
-};
+}
+$('#clear').onclick = () => { send({ cmd: 'clear' }); resetView(); };
 $('#info-close').onclick = () => { $('#info').style.display = 'none'; selectMarker.visible = false; };
 $('#info-synapses').onclick = () => showSynapses(state.info);
 $('#info-skeleton').onclick = () => showSkeleton(state.info.idx);
 $('#info-points').onclick = () => showSynapsePoints(state.info.idx);
-$('#new-day').onclick = () => { if (confirm('Забыть весь день: следы, лезии и связи всех посетителей?')) { send({ cmd: 'new_day' }); contactCache.clear(); } };
 
 function buildPresets() {
   const box = $('#presets');
@@ -595,6 +686,7 @@ async function main() {
   buildPoints(); frameCamera(); buildPresets();
   loadMesh('volume', { color: 0x8fa3c7, opacity: 0.035, wire: 0.05 });
   connect();
+  loadTour().then(showQuick);
   setStatus('');
   let last = performance.now();
   renderer.setAnimationLoop(() => {
@@ -610,7 +702,8 @@ async function main() {
       if (camera.position.distanceTo(camGoal.pos) < 1) camGoal.active = false;
     }
     pointMat.uniforms.uScale.value = innerHeight / 2;
-    if (tr.vocabName === FLY_TAB) { arena.step(Math.min(dt, 0.1)); $('#arena-action').textContent = arena.action; }
+    if (tr.vocabName === FLY_TAB || stage.fallback) arena.step(Math.min(dt, 0.1));
+    if (tr.vocabName === FLY_TAB) $('#arena-action').textContent = arena.action;
     controls.update();
     renderer.render(scene, camera);
   });

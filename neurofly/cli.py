@@ -100,12 +100,9 @@ def cmd_run(args: argparse.Namespace) -> None:
 def cmd_serve(args: argparse.Namespace) -> None:
     from .server import main as serve_main
 
-    from .traces import TraceParams
-
-    tp = TraceParams(hold_s=args.hold, alpha=args.trace_alpha, gain_max=args.trace_max, tau_h=args.trace_tau)
     serve_main(host=args.host, port=args.port, window_ms=args.window, seed=args.seed,
                data_dir=args.data_dir, release=args.release, prefetch_meshes=not args.no_meshes,
-               fresh=args.fresh, synapse_points=not args.no_synapses, trace_params=tp, eps=args.eps,
+               synapse_points=not args.no_synapses, hold_s=args.hold, eps=args.eps,
                idle_s=args.idle, attract_step_s=args.attract_step, attract=not args.no_attract)
 
 
@@ -160,12 +157,8 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--seed", type=int, default=None)
     s.add_argument("--no-meshes", action="store_true", help="do not download the brain outline mesh")
     s.add_argument("--no-synapses", action="store_true", help="do not load the synapse point index")
-    s.add_argument("--fresh", action="store_true", help="ignore the saved state of the day")
     s.add_argument("--hold", type=float, default=20.0, help="seconds a visitor's activation lasts (0 = until removed)")
-    s.add_argument("--trace-alpha", type=float, default=1e-4, help="gain added to a neuron's outputs per spike (0 = off)")
-    s.add_argument("--trace-max", type=float, default=1.6, help="ceiling of the use trace")
-    s.add_argument("--trace-tau", type=float, default=8.0, help="hours for the trace to decay by 1/e")
-    s.add_argument("--idle", type=float, default=45.0, help="seconds without visitors before the demonstration starts")
+    s.add_argument("--idle", type=float, default=45.0, help="seconds without visitors before the brain is cleared and the demonstration starts")
     s.add_argument("--attract-step", type=float, default=12.0, help="seconds per scenario in the demonstration")
     s.add_argument("--no-attract", action="store_true", help="never run the demonstration")
     s.add_argument("--eps", type=float, default=None, help="mV below which a neuron sleeps (default 0.2; 0.01 is exact but 2x slower)")
