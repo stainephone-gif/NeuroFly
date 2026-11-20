@@ -41,7 +41,12 @@
   #translate { display:block; }
   #arena { position:fixed; right:16px; bottom:16px; width:min(94vw, 400px); }
   #tour { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); width:min(92vw, 520px); display:none; border-color:rgba(255,209,102,.35); z-index:5; }
-  body.touring #legend, body.touring #hint { display:none; }
+  body.touring #legend, body.touring #hint, body.touring #quick-body { display:none; }
+  .q-title { margin:2px 0 4px; font-size:22px; font-weight:650; line-height:1.2; }
+  .q-result { font-size:18px; font-weight:600; margin-top:8px; }
+  .q-result:empty { display:none; }
+  #quick .more { margin-top:12px; padding-top:10px; border-top:1px solid rgba(255,255,255,.08); }
+  body.touring #quick .more { margin-top:0; padding-top:0; border-top:0; }
   #tour .hint { font-size:15px; line-height:1.4; }
   button.accent { border-color:var(--acc); color:var(--acc); }
   .big-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
@@ -90,10 +95,22 @@
 <div id="status"></div>
 
 <div id="tools">
-  <div class="panel">
-    <div class="big-row">
-      <button id="tour-start" class="big accent">Экскурсия</button>
-      <button id="memes-toggle" class="big accent">Мемы про мозг мухи</button>
+  <div class="panel" id="quick">
+    <div id="quick-body">
+      <div class="caption">Модель мозга дрозофилы</div>
+      <h2 id="q-title" class="q-title"></h2>
+      <div id="q-text" class="hint"></div>
+      <div id="q-result" class="q-result"></div>
+      <div id="q-after" class="hint" style="color:var(--acc)"></div>
+      <div class="modes" style="margin-top:10px">
+        <button id="q-action" class="big on"></button>
+        <button id="q-next" class="big accent"></button>
+        <button id="q-retry" class="big">Повторить</button>
+      </div>
+    </div>
+    <div class="modes more">
+      <button id="tour-start" class="accent">Разобрать, как это работает</button>
+      <button id="memes-toggle" class="accent">Тот же сигнал, другой смысл</button>
     </div>
     <div class="caption" style="margin-top:8px">Щёлкните по любой точке мозга, чтобы узнать, что это за нейрон.</div>
   </div>
@@ -153,10 +170,12 @@
 <div id="tour" class="panel">
   <div class="tr-head"><b id="tour-title"></b><span class="caption" id="tour-step" style="flex:1"></span><button id="tour-close">×</button></div>
   <div id="tour-text" class="hint"></div>
+  <div id="tour-result" class="q-result"></div>
   <div id="tour-after" class="hint" style="color:var(--acc)"></div>
   <div class="modes" style="margin-top:10px">
     <button id="tour-action" class="on"></button>
     <button id="tour-next">Дальше</button>
+    <button id="tour-retry">Повторить</button>
   </div>
 </div>
 <div id="arena" class="panel">
@@ -167,7 +186,7 @@
     <div id="meme-caption"></div>
     <div id="meme-missing" class="caption"></div>
   </div>
-  <div class="caption" id="arena-note">Телом управляют только каналы мозга: DNp09 вперёд, MDN назад, DNa02 повороты, MN9 хоботок, DNp01 прыжок. В экскурсии видно, как одна новая связь меняет походку.</div>
+  <div class="caption" id="arena-note">Телом управляют только каналы мозга: DNp09 вперёд, MDN назад, DNa02 повороты, MN9 хоботок, DNp01 прыжок. Слева можно проверить, как одна новая связь меняет поведение.</div>
 </div>
 <div id="legend"></div>
 <div id="hint">колесо: масштаб · перетаскивание: вращение</div>
