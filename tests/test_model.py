@@ -282,3 +282,18 @@ def test_server_exits_when_the_simulation_thread_dies(monkeypatch):
     sim._loop = boom
     sim.run()
     assert codes == [1]
+
+
+def test_start_panel_and_neurofly_routes():
+    """The kiosk opens on the start panel; NeuroFly lives at /neurofly."""
+    from types import SimpleNamespace
+
+    pytest.importorskip("websockets")
+    from neurofly import server
+
+    gs = server.GalleryServer.__new__(server.GalleryServer)
+    get = lambda p: gs.http(None, SimpleNamespace(path=p, headers={}))
+    root, fly = get("/"), get("/neurofly")
+    assert root.status_code == 200 and "Интерактивные медиа и цифровые индустрии" in root.body.decode()
+    assert fly.status_code == 200 and b"app.js" in fly.body and b'<base href="/">' in fly.body
+    assert get("/panel/neurofly.jpg").status_code == 200

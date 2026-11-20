@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
+<base href="/">
 <title>NeuroFly</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
@@ -9,7 +10,9 @@
   html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:14px/1.35 -apple-system, "Segoe UI", Roboto, sans-serif; overflow:hidden; }
   canvas { display:block; }
   #hud { position:fixed; left:16px; top:14px; pointer-events:none; }
-  #hud h1 { margin:0 0 4px; font-size:20px; font-weight:600; letter-spacing:.04em; }
+  #hud h1 { margin:0 0 4px; font-size:20px; font-weight:600; letter-spacing:.04em; display:flex; align-items:center; gap:12px; }
+  #home { pointer-events:auto; font-size:13px; font-weight:500; letter-spacing:0; padding:5px 10px; text-decoration:none; color:var(--fg); background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); border-radius:8px; }
+  #home:hover { background:rgba(255,255,255,.12); }
   #hud .row { color:var(--dim); font-variant-numeric: tabular-nums; }
   #hud b { color:var(--fg); font-weight:500; }
   #tools { position:fixed; left:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; width:min(92vw, 560px); max-height:calc(100vh - 150px); overflow:auto; }
@@ -85,7 +88,7 @@
 </head>
 <body>
 <div id="hud">
-  <h1>NeuroFly</h1>
+  <h1><a id="home" href="/">← Назад</a>NeuroFly</h1>
   <div class="row">мозг дрозофилы · <b id="n-neurons">…</b> нейронов · <b id="n-syn">…</b> синапсов</div>
   <div class="row">время модели <b id="t">0.00 с</b> · скорость <b id="speed">…</b></div>
   <div class="row">спайков/с <b id="rate">0</b> · активных нейронов <b id="active">0</b></div>

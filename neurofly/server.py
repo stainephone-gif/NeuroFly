@@ -538,7 +538,9 @@ class GalleryServer:
         try:
             if path == "/favicon.ico":
                 return resp(b"", "image/x-icon", 204)
-            if path in ("/", "/index.html"):
+            if path in ("/", "/panel", "/panel/"):   # start screen of the kiosk: NeuroFly or the trailer
+                return resp((WEB_DIR / "panel" / "index.html").read_bytes(), "text/html; charset=utf-8")
+            if path in ("/neurofly", "/neurofly/", "/index.html"):
                 return resp((WEB_DIR / "index.html").read_bytes(), "text/html; charset=utf-8")
             if path == "/api/meta.json":
                 return resp(json.dumps(self.meta()).encode(), "application/json")
