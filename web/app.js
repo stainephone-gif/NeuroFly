@@ -709,3 +709,10 @@ async function main() {
   });
 }
 main().catch((e) => setStatus('ошибка: ' + e.message));
+
+// Back to the kiosk's start panel when nobody has touched the screen for a while.
+// (The server clears the brain on its own after --idle seconds.)
+const PANEL_IDLE_MS = 90000;
+let touchedAt = performance.now();
+for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart']) addEventListener(ev, () => { touchedAt = performance.now(); }, { passive: true });
+setInterval(() => { if (performance.now() - touchedAt > PANEL_IDLE_MS) location.href = '/'; }, 5000);
