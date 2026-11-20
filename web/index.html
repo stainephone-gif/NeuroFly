@@ -38,8 +38,6 @@
   #info .stats b { color:var(--fg); font-weight:500; }
   #info .actions { display:flex; gap:6px; flex-wrap:wrap; }
   #hint { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); color:var(--dim); pointer-events:none; text-align:center; font-size:13px; }
-  #feed div { color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #feed div:last-child { color:var(--fg); }
   #translate { display:block; }
   #arena { position:fixed; right:16px; bottom:16px; width:min(94vw, 400px); }
   #tour { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); width:min(92vw, 520px); display:none; border-color:rgba(255,209,102,.35); z-index:5; }
@@ -88,8 +86,6 @@
   <div class="row">время модели <b id="t">0.00 с</b> · скорость <b id="speed">…</b></div>
   <div class="row">спайков/с <b id="rate">0</b> · активных нейронов <b id="active">0</b></div>
   <div class="row">возбуждено <b id="n-stim">0</b> · выключено <b id="n-sil">0</b> · ваших связей <b id="n-extra">0</b></div>
-  <div class="row" id="day">сегодня: <b id="day-actions">0</b> вмешательств · след в <b id="day-traced">0</b> нейронах</div>
-  <div id="feed" class="row" style="margin-top:6px; font-size:12px; max-width:420px"></div>
 </div>
 <div id="status"></div>
 
@@ -134,7 +130,6 @@
       </div>
       <div class="modes" style="margin-top:8px">
         <button id="pause">Пауза</button>
-        <button id="new-day" class="danger" title="забыть весь день: следы, лезии, связи">Новый день</button>
       </div>
     </details>
   </div>

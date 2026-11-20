@@ -222,29 +222,50 @@ def test_damaged_numba_cache_repairs_itself(tmp_path, damage):
     assert "damaged" not in third.stderr
 
 
-def test_traces_survive_a_damaged_gain_file(tmp_path):
-    from neurofly.traces import TraceParams, Traces
+def _bare_sim(brain, hold_s=20.0, idle_s=45.0):
+    import threading
+    import time
 
+    from neurofly import server
+
+    sim = server.Simulation.__new__(server.Simulation)
+    sim.brain, sim.hold_s, sim.expires, sim.lock = brain, hold_s, {}, threading.Lock()
+    sim.idle, sim.idle_s, sim.last_activity = False, idle_s, time.time()
+    sim.attract_enabled, sim.presets, sim.attract_current, sim._attract_since = False, [], None, 0.0
+    return sim
+
+
+def test_nothing_is_inherited_by_the_next_visitor():
+    """When the screen goes idle the brain returns to the connectome as loaded."""
     b = make()
-    t = Traces(b, TraceParams(), tmp_path)
-    b.gain[1] = 1.3
-    t.log("activate", idx=[0])
-    t.save(force=True)
-    assert not list(tmp_path.glob("*.tmp"))
+    sim = _bare_sim(b)
+    sim._apply({"cmd": "silence", "idx": [2]})
+    sim._apply({"cmd": "connect", "pre": 0, "post": 2, "pres": [0], "posts": [2], "n": 30, "sign": 1})
+    sim._apply({"cmd": "activate", "idx": [1], "rate": 100, "hold": 0})
+    assert b.silenced[2] and b.n_extra() > 0 and b.stim_rate[1] > 0
 
-    b2 = make()
-    Traces(b2, TraceParams(), tmp_path)
-    assert b2.gain[1] == pytest.approx(1.3)
+    sim._attract_tick()            # visitor still here
+    assert b.n_extra() > 0 and not sim.idle
 
-    (tmp_path / "gain.npy").write_bytes(b"\x00" * 128)
-    b3 = make()
-    t3 = Traces(b3, TraceParams(), tmp_path)
-    assert np.all(b3.gain == 1.0)
-    assert len(t3.journal) == 1
+    sim.last_activity -= 60        # visitor walked away
+    sim._attract_tick()
+    assert sim.idle
+    assert not b.silenced.any() and b.n_extra() == 0 and not b.stim_rate.any()
+    assert np.all(b.gain == 1.0)
 
-    (tmp_path / "state.json").write_bytes(b"\x00" * 64)
-    t4 = Traces(make(), TraceParams(), tmp_path)
-    assert t4.journal == []
+    sim._apply({"cmd": "touch"})   # the next visitor
+    assert not sim.idle
+
+
+def test_a_scenario_stimulus_fades_after_hold():
+    b = make()
+    sim = _bare_sim(b, hold_s=20.0)
+    sim._apply({"cmd": "activate", "idx": [1], "rate": 100})
+    sim._expire()
+    assert b.stim_rate[1] > 0
+    sim.expires[1] -= 30
+    sim._expire()
+    assert b.stim_rate[1] == 0 and not sim.expires
 
 
 def test_server_exits_when_the_simulation_thread_dies(monkeypatch):

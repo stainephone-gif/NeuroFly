@@ -294,6 +294,7 @@ function onFrame(buf) {
 }
 
 function onStatus(s) {
+  if (s.idle && !(state.status && state.status.idle)) resetView();   // the visitor left; the server has cleared the brain
   state.status = s;
   state.stimMap = new Map(s.stim);
   state.silSet = new Set(s.silenced);
@@ -305,16 +306,6 @@ function onStatus(s) {
     points.geometry.attributes.flag.needsUpdate = true;
   }
   drawExtra(s.extra); drawContacts(s.extra);
-  if (s.traces) {
-    const tr = s.traces;
-    $('#day-actions').textContent = tr.actions; $('#day-traced').textContent = tr.traced_neurons;
-    const verb = { activate: 'возбудил', silence: 'выключил', unsilence: 'включил', connect: 'связал', disconnect: 'разорвал', clear: 'снял всё' };
-    $('#feed').innerHTML = tr.recent.slice(-4).map((e) => {
-      const t = new Date(e.t * 1000).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
-      const what = e.action === 'connect' ? e.label : (e.label ? `${e.label}${e.n > 1 ? ' × ' + e.n : ''}` : '');
-      return `<div>${t} · ${verb[e.action] || e.action} ${what}</div>`;
-    }).join('');
-  }
   renderTranslation();
   $('#n-stim').textContent = s.n_stim; $('#n-sil').textContent = s.n_silenced; $('#n-extra').textContent = s.n_extra;
   $('#rate').textContent = Math.round(s.spikes_per_s); $('#active').textContent = s.active;
@@ -343,7 +334,6 @@ function onInfo(info) {
   st.push(['входов', `${info.n_in} нейронов · ${info.syn_in} синапсов`]);
   st.push(['выходов', `${info.n_out} нейронов · ${info.syn_out} синапсов`]);
   st.push(['состояние', info.silenced ? 'выключен' : info.stim > 0 ? `возбуждён ${info.stim} Гц` : 'обычное']);
-  if (info.gain && Math.abs(info.gain - 1) > 0.001) st.push(['след дня', `выходы × ${info.gain.toFixed(3)}`]);
   $('#info-stats').innerHTML = st.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('');
 }
 
@@ -448,9 +438,10 @@ const tour = {
     $('#tour').style.display = 'block'; $('#tour-start').classList.add('on'); document.body.classList.add('touring');
     this.i = -1; this.next();
   },
-  stop() {
+  stop(quiet) {   // quiet: the brain is already clean, and a command would end the demonstration
     this.i = -1; $('#tour').style.display = 'none'; $('#tour-start').classList.remove('on'); document.body.classList.remove('touring');
-    send({ cmd: 'clear' }); camGoal.active = false;
+    if (!quiet) send({ cmd: 'clear' });
+    camGoal.active = false;
     this.run([['overlays', 'clear'], ['json', false], ['vocab', 'Муха'], ['memes', false]]);
     selectMarker.visible = false;
   },
@@ -547,21 +538,21 @@ const slowFactor = (v) => Math.round(Math.pow(50, v / 100) * 10) / 10;
 $('#speed-slider').oninput = (e) => { const f = slowFactor(+e.target.value); $('#speed-out').textContent = f <= 1 ? '1×' : `1/${f}`; };
 $('#speed-slider').onchange = (e) => { const f = slowFactor(+e.target.value); send({ cmd: 'speed', value: 1 / f }); };
 $('#pause').onclick = () => send({ cmd: state.status && state.status.paused ? 'play' : 'pause' });
-$('#clear').onclick = () => {
-  if (tour.i >= 0) tour.stop();
-  send({ cmd: 'clear' });
+// the screen as a new visitor finds it; the server clears the brain itself when the demonstration starts
+function resetView() {
+  if (tour.i >= 0) tour.stop(true);
   setLines(synLines, new Float32Array(0), new Float32Array(0));
   setLines(skeletonLines, new Float32Array(0), new Float32Array(0));
   setSynPoints(new Float32Array(0), new Float32Array(0));
   setMemes(false);
   $('#info').style.display = 'none'; selectMarker.visible = false; state.selected = null;
   frameCamera(); controls.autoRotate = true;
-};
+}
+$('#clear').onclick = () => { send({ cmd: 'clear' }); resetView(); };
 $('#info-close').onclick = () => { $('#info').style.display = 'none'; selectMarker.visible = false; };
 $('#info-synapses').onclick = () => showSynapses(state.info);
 $('#info-skeleton').onclick = () => showSkeleton(state.info.idx);
 $('#info-points').onclick = () => showSynapsePoints(state.info.idx);
-$('#new-day').onclick = () => { if (confirm('Забыть весь день: следы, лезии и связи всех посетителей?')) { send({ cmd: 'new_day' }); contactCache.clear(); } };
 
 function buildPresets() {
   const box = $('#presets');

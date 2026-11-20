@@ -50,10 +50,9 @@ import numpy as np
 from . import neurons as N
 from .annotations import Atlas
 from .archive import NEUROPILS, load_mesh, skeleton_segments
-from .data import load_brain, default_data_dir
+from .data import load_brain
 from .model import FlyBrain
 from .synapses import SynapseIndex
-from .traces import TraceParams, Traces
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 MAX_PAIRS_PER_CONNECT = 4000   # a type-to-type connection between two big types is sampled down to this
@@ -106,11 +105,13 @@ def build_channels(brain: FlyBrain, atlas: Atlas) -> list[dict]:
 class Simulation(threading.Thread):
     """Runs the brain in its own thread; talks to asyncio through queues."""
 
-    def __init__(self, brain: FlyBrain, atlas: Atlas, window_ms: float = 10.0, traces: Traces | None = None):
+    def __init__(self, brain: FlyBrain, atlas: Atlas, window_ms: float = 10.0, hold_s: float = 20.0):
         super().__init__(daemon=True)
         self.brain = brain
         self.atlas = atlas
-        self.traces = traces
+        # a visitor's activation fades after hold_s wall seconds, like a hand lifted from a button
+        self.hold_s = hold_s
+        self.expires: dict[int, float] = {}   # stimulated neuron -> wall time it switches off
         self.window_ms = window_ms
         self.commands: Queue = Queue()
         self.frames: Queue = Queue(maxsize=64)
@@ -135,6 +136,7 @@ class Simulation(threading.Thread):
         self._attract_i = -1
         self._attract_since = 0.0
         self.attract_current: dict | None = None
+        self.idle = False   # nobody has touched the screen for idle_s; the brain has been cleared
 
     def run(self) -> None:
         try:
@@ -182,10 +184,7 @@ class Simulation(threading.Thread):
                     idx = np.concatenate(spk).astype(np.uint32) if spk else np.empty(0, np.uint32)
                 t_ms = b.t_ms
                 self._attract_tick()
-                if self.traces is not None:
-                    # the demonstration should not carve traces into the day
-                    self.traces.after_window(idx, self.window_ms, learn=self.attract_current is None)
-                    self.traces.save()
+                self._expire()
             wall = time.perf_counter() - t0
             ema_wall = wall if ema_wall is None else 0.9 * ema_wall + 0.1 * wall
             self.compute_ratio = (self.window_ms / 1000) / max(ema_wall, 1e-9)
@@ -211,12 +210,41 @@ class Simulation(threading.Thread):
             if wall < budget:
                 time.sleep(budget - wall)
 
-    def _attract_tick(self) -> None:
-        """Called every window from the simulation thread (lock held)."""
-        if not self.attract_enabled or not self.presets:
+    def _expire(self) -> None:
+        """Switch off activations whose hold time is over (lock held)."""
+        if not self.expires:
             return
         now = time.time()
+        done = [i for i, t in self.expires.items() if t <= now]
+        if done:
+            self.brain.deactivate(done)
+            for i in done:
+                del self.expires[i]
+
+    def _hold(self, idx, hold_s) -> None:
+        h = self.hold_s if hold_s is None else float(hold_s)
+        if h <= 0:   # until removed; the idle reset still clears it when the visitor leaves
+            for i in idx:
+                self.expires.pop(int(i), None)
+            return
+        until = time.time() + h
+        for i in idx:
+            self.expires[int(i)] = until
+
+    def forget_visitor(self) -> None:
+        """Nothing is inherited: the next visitor gets the brain as it came from the data (lock held)."""
+        self.brain.clear()
+        self.expires.clear()
+
+    def _attract_tick(self) -> None:
+        """Called every window from the simulation thread (lock held)."""
+        now = time.time()
         if now - self.last_activity < self.idle_s:
+            return
+        if not self.idle:
+            self.forget_visitor()   # the visitor has left
+            self.idle = True
+        if not self.attract_enabled or not self.presets:
             return
         if self.attract_current is None or now - self._attract_since > self.attract_step_s:
             b = self.brain
@@ -234,6 +262,7 @@ class Simulation(threading.Thread):
     def visitor_activity(self) -> None:
         """A person did something: stop the demonstration and note the time."""
         self.last_activity = time.time()
+        self.idle = False
         if self.attract_current is not None:
             self.brain.deactivate(self.attract_current["idx"])
             self.attract_current = None
@@ -271,7 +300,6 @@ class Simulation(threading.Thread):
     def _apply(self, cmd: dict):
         b = self.brain
         c = cmd.get("cmd")
-        tr = self.traces
         with self.lock:
             if c not in ("info", "type", "speed", "pause", "play"):
                 self.visitor_activity()
@@ -281,27 +309,24 @@ class Simulation(threading.Thread):
                 idx = self._expand(cmd.get("idx", []), cmd.get("expand"))
                 rate = float(cmd.get("rate", 100))
                 b.activate(idx, rate)
-                if tr:
-                    tr.hold(idx, cmd.get("hold"))
-                    tr.log("activate", n=len(idx), rate=rate, label=self._label(cmd.get("idx", [])))
+                self._hold(idx, cmd.get("hold"))
                 return {"type": "ack", "cmd": c, "n": len(idx)}
             if c == "deactivate":
                 idx = cmd.get("idx")
                 idx = self._expand(idx, cmd.get("expand")) if idx else None
                 b.deactivate(idx)
-                if tr:
-                    tr.release(idx)
+                if idx is None:
+                    self.expires.clear()
+                else:
+                    for i in idx:
+                        self.expires.pop(int(i), None)
             elif c == "silence":
                 idx = self._expand(cmd.get("idx", []), cmd.get("expand"))
                 b.silence(idx)
-                if tr:
-                    tr.log("silence", n=len(idx), label=self._label(cmd.get("idx", [])))
                 return {"type": "ack", "cmd": c, "n": len(idx)}
             elif c == "unsilence":
                 idx = cmd.get("idx")
                 b.unsilence(self._expand(idx, cmd.get("expand")) if idx else None)
-                if tr:
-                    tr.log("unsilence", n=len(idx) if idx else -1)
             elif c == "connect":
                 pre, post = int(cmd["pre"]), int(cmd["post"])
                 n_syn, sign = float(cmd.get("n", 10)), int(cmd.get("sign", 1))
@@ -314,30 +339,14 @@ class Simulation(threading.Thread):
                 pairs = self._pair_groups(pres, posts, MAX_PAIRS_PER_CONNECT)
                 for i, j in pairs:
                     b.connect(i, j, n_syn, sign)
-                if tr:
-                    lab = f"{self._label([pre])} → {self._label([post])}"
-                    if len(pairs) > 1:
-                        lab += f" ({len(pres)}×{len(posts)})"
-                    tr.log("connect", pre=pre, post=post, n=n_syn, sign=sign, pairs=len(pairs), label=lab)
                 return {"type": "ack", "cmd": c, "n": len(pairs)}
             elif c == "disconnect":
                 pre, post = cmd.get("pre"), cmd.get("post")
                 b.disconnect(None if pre is None else int(pre), None if post is None else int(post))
-                if tr:
-                    tr.log("disconnect")
             elif c == "reset":
                 b.reset()
             elif c == "clear":
-                b.clear()
-                if tr:
-                    tr.release()
-                    tr.log("clear")
-            elif c == "new_day":
-                if tr:
-                    tr.new_day()
-                else:
-                    b.clear()
-                    b.gain[:] = 1.0
+                self.forget_visitor()
             elif c == "pause":
                 self.paused = True
             elif c == "play":
@@ -362,12 +371,6 @@ class Simulation(threading.Thread):
         rng = np.random.default_rng()
         k = rng.choice(total, size=cap, replace=False)
         return [(int(pres[t // len(posts)]), int(posts[t % len(posts)])) for t in k]
-
-    def _label(self, idx) -> str:
-        if not idx:
-            return ""
-        row = self.atlas.df.iloc[int(idx[0])]
-        return str(row.cell_type) or str(row.hemibrain_type) or str(row.super_class) or "?"
 
     def _info(self, i: int) -> dict:
         b, df = self.brain, self.atlas.df
@@ -394,7 +397,6 @@ class Simulation(threading.Thread):
             "in": [[int(in_idx[k]), float(in_w[k])] for k in order_in],
             "stim": float(b.stim_rate[i]),
             "silenced": bool(b.silenced[i]),
-            "gain": float(b.gain[i]),
         }
 
     def channel_rates(self) -> dict:
@@ -423,27 +425,20 @@ class Simulation(threading.Thread):
                 "n_extra": b.n_extra(),
                 "channels": self.channel_rates(),
                 "attract": self.attract_current["label"] if self.attract_current else None,
+                "idle": self.idle,
                 "awake": int(b.n_awake) if b.fast else -1,
                 "fast": bool(b.fast),
-                "traces": self.traces.summary() if self.traces else None,
             }
-
-
-def asdict_traces(tr: Traces | None):
-    if tr is None:
-        return None
-    from dataclasses import asdict
-    return asdict(tr.p)
 
 
 # ------------------------------------------------------------------- server
 class GalleryServer:
-    def __init__(self, brain: FlyBrain, atlas: Atlas, window_ms: float = 10.0, traces: Traces | None = None,
+    def __init__(self, brain: FlyBrain, atlas: Atlas, window_ms: float = 10.0, hold_s: float = 20.0,
                  synapses: SynapseIndex | None = None):
         self.brain = brain
         self.atlas = atlas
         self.synapses = synapses
-        self.sim = Simulation(brain, atlas, window_ms, traces)
+        self.sim = Simulation(brain, atlas, window_ms, hold_s)
         self.clients: set = set()
         self.presets = build_presets(brain, atlas)
         self.sim.presets = self.presets
@@ -481,7 +476,7 @@ class GalleryServer:
                 "n_connections": int(self.brain.W.nnz),
                 "n_synapses": int(np.abs(self.brain.W.data).sum()),
                 "has_synapse_points": self.synapses is not None,
-                "traces": asdict_traces(self.sim.traces),
+                "hold_s": self.sim.hold_s,
             }
         return self._meta
 
@@ -565,9 +560,6 @@ class GalleryServer:
                         a, b_ = tok.split("-")
                         out[tok] = self.contact_point(int(a), int(b_))
                 return resp(json.dumps(out).encode(), "application/json")
-            if path == "/api/journal":
-                tr = self.sim.traces
-                return resp(json.dumps(tr.journal[-200:] if tr else []).encode(), "application/json")
             if path.startswith("/api/skeleton/"):
                 return resp(self.skeleton_bin(int(path.rsplit("/", 1)[1])), "application/octet-stream")
             if path.startswith("/api/search"):
@@ -670,8 +662,8 @@ class GalleryServer:
 
 
 def main(host: str = "0.0.0.0", port: int = 8765, window_ms: float = 10.0, seed: int | None = None,
-         data_dir=None, release=None, prefetch_meshes: bool = True, fresh: bool = False,
-         synapse_points: bool = True, trace_params: TraceParams | None = None, eps: float | None = None,
+         data_dir=None, release=None, prefetch_meshes: bool = True,
+         synapse_points: bool = True, hold_s: float = 20.0, eps: float | None = None,
          idle_s: float = 45.0, attract_step_s: float = 12.0, attract: bool = True) -> None:
     from .model import Params
     params = Params(eps=eps) if eps is not None else None
@@ -690,15 +682,8 @@ def main(host: str = "0.0.0.0", port: int = 8765, window_ms: float = 10.0, seed:
             print(f"synapse points: {len(syn)}", file=sys.stderr)
         except FileNotFoundError:
             print("synapse points not built (run `neurofly archive --synapses`); showing lines instead", file=sys.stderr)
-    state_dir = (Path(data_dir) if data_dir else default_data_dir()) / "state"
-    traces = Traces(brain, trace_params or TraceParams(), state_dir, fresh=fresh)
-    print(f"traces: {traces.summary()['actions']} actions in the journal, "
-          f"{traces.summary()['traced_neurons']} traced neurons, {brain.n_extra()} hand-made synapses", file=sys.stderr)
-    server = GalleryServer(brain, atlas, window_ms, traces, syn)
+    server = GalleryServer(brain, atlas, window_ms, hold_s, syn)
     server.sim.attract_enabled = attract
     server.sim.idle_s = idle_s
     server.sim.attract_step_s = attract_step_s
-    try:
-        asyncio.run(server.serve(host, port))
-    finally:
-        traces.save(force=True)
+    asyncio.run(server.serve(host, port))
