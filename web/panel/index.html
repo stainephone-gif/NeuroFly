@@ -24,14 +24,14 @@
   .tile:focus-visible { outline:3px solid var(--acc); outline-offset:4px; }
   .tile .bg { position:absolute; inset:0; z-index:-2; width:100%; height:100%; object-fit:cover; transition:transform 6s ease; }
   .tile:hover .bg { transform:scale(1.04); }
-  .tile::after { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(180deg, rgba(5,6,10,0) 35%, rgba(5,6,10,.88) 100%); }
-  .tile .text { padding:clamp(18px, 3vw, 40px); }
-  .tile .kind { font-size:clamp(13px, 1.3vw, 17px); color:var(--dim); letter-spacing:.08em; text-transform:uppercase; margin-bottom:8px; }
+  .tile::after { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(180deg, rgba(5,6,10,0) 30%, rgba(5,6,10,.6) 58%, rgba(5,6,10,.94) 100%); }
+  .tile .text { padding:clamp(18px, 3vw, 40px); text-shadow:0 1px 14px rgba(0,0,0,.6); }
+  .tile .kind { font-size:clamp(13px, 1.3vw, 17px); color:#c9c6bd; letter-spacing:.08em; text-transform:uppercase; margin-bottom:8px; }
   .tile .name { font-size:clamp(30px, 4.2vw, 64px); font-weight:700; line-height:1; display:flex; align-items:center; gap:.35em; }
   .tile .sub { margin-top:10px; font-size:clamp(15px, 1.6vw, 22px); color:var(--fg); opacity:.85; max-width:30ch; }
   .tile .go { display:inline-flex; align-items:center; justify-content:center; width:1em; height:1em; border-radius:50%; font-size:.8em; background:var(--acc); color:#1a1300; }
   .tile .go svg { width:42%; height:42%; }
-  #fly-tile .bg { background:#05060a; }
+  #fly-tile .bg { background:#05060a; object-position:50% 20%; }
   #trailer-tile .bg.fallback { background:radial-gradient(80% 90% at 70% 30%, rgba(255,209,102,.22), transparent 70%), radial-gradient(70% 80% at 20% 80%, rgba(79,209,255,.18), transparent 70%), #0b0d14; }
 
   footer { color:var(--dim); text-align:center; font-size:clamp(13px, 1.3vw, 16px); }
